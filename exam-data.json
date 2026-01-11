@@ -1,0 +1,62 @@
+{
+  "title": "SEB Placement Mock Test",
+  "duration": 60,
+  "maxViolations": 3,
+  "questions": [
+    {
+      "id": 1,
+      "question": "What is JVM?",
+      "options": [
+        "Operating System",
+        "Virtual Machine",
+        "Compiler",
+        "Hardware"
+      ],
+      "correct": 1
+    },
+    {
+      "id": 2,
+      "question": "Which data structure uses FIFO?",
+      "options": [
+        "Stack",
+        "Queue",
+        "Tree",
+        "Graph"
+      ],
+      "correct": 1
+    },
+    {
+      "id": 3,
+      "question": "What does SQL stand for?",
+      "options": [
+        "Structured Query Language",
+        "Simple Query Language",
+        "Standard Query Language",
+        "System Query Language"
+      ],
+      "correct": 0
+    },
+    {
+      "id": 4,
+      "question": "Which of the following is not a programming paradigm?",
+      "options": [
+        "Object-Oriented",
+        "Functional",
+        "Procedural",
+        "Algorithmic"
+      ],
+      "correct": 3
+    },
+    {
+      "id": 5,
+      "question": "What is the time complexity of binary search?",
+      "options": [
+        "O(n)",
+        "O(log n)",
+        "O(n²)",
+        "O(1)"
+      ],
+      "correct": 1
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "title": "Placement Mock Test - Computer Science",
+  "description": "Comprehensive placement test covering programming fundamentals, data structures, and algorithms",
+  "duration": 60,
+  "passingPercentage": 60,
+  "questions": [
+    {
+      "question": "What is JVM?",
+      "options": ["Operating System", "Virtual Machine", "Compiler", "Hardware"],
+      "correct": 1,
+      "marks": 1
+    },
+    {
+      "question": "Which data structure follows LIFO principle?",
+      "options": ["Queue", "Stack", "Array", "Linked List"],
+      "correct": 1,
+      "marks": 1
+    },
+    {
+      "question": "What is the time complexity of binary search?",
+      "options": ["O(n)", "O(log n)", "O(n log n)", "O(1)"],
+      "correct": 1,
+      "marks": 1
+    },
+    {
+      "question": "Explain the concept of polymorphism in object-oriented programming.",
+      "questionType": "short_answer",
+      "correctAnswer": "Polymorphism allows objects of different types to be treated as objects of a common base type",
+      "marks": 2
+    },
+    {
+      "question": "What is the difference between REST and GraphQL? Write a detailed comparison.",
+      "questionType": "essay",
+      "correctAnswer": "REST uses multiple endpoints while GraphQL uses a single endpoint. REST returns fixed data structures while GraphQL allows clients to specify exactly what data they need.",
+      "marks": 3
+    }
+  ],
+  "proctoring": {
+    "enabled": true,
+    "allowTabSwitch": false,
+    "maxAttempts": 1,
+    "maxViolations": 5
+  }
+}

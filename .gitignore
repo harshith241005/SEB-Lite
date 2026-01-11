@@ -1,0 +1,58 @@
+# Dependencies
+node_modules/
+package-lock.json
+npm-debug.log
+yarn-error.log
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Build output
+/build/
+/dist/
+/frontend/build/
+*.tsbuildinfo
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.code-workspace
+
+# Electron
+/electron/build/
+/electron-builder/
+*.exe
+*.dmg
+*.AppImage
+
+# Testing
+coverage/
+.nyc_output/
+
+# Logs
+logs/
+*.log
+
+# OS files
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+
+# MongoDB
+*.mongod
