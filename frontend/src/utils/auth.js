@@ -1,70 +1,84 @@
-// Authentication utility functions
+import CryptoJS from "crypto-js";
 
-/**
- * Store authentication tokens
- */
-export const setAuthTokens = (accessToken, refreshToken, user) => {
-  localStorage.setItem("accessToken", accessToken);
-  localStorage.setItem("refreshToken", refreshToken);
-  localStorage.setItem("user", JSON.stringify(user));
+const STORAGE_KEY = "seb-lite-auth";
+const LEGACY_KEYS = ["accessToken", "refreshToken", "token", "user"];
+
+const deriveKey = () => {
+  const platform = window.electronAPI?.getPlatform?.() || navigator.platform;
+  return CryptoJS.SHA256(`${navigator.userAgent}|${platform}`).toString();
 };
 
-/**
- * Get access token (with backward compatibility)
- */
+const readPayload = () => {
+  const encrypted = localStorage.getItem(STORAGE_KEY);
+  if (!encrypted) {
+    return null;
+  }
+
+  try {
+    const bytes = CryptoJS.AES.decrypt(encrypted, deriveKey());
+    const decrypted = bytes.toString(CryptoJS.enc.Utf8);
+    return JSON.parse(decrypted);
+  } catch (error) {
+    localStorage.removeItem(STORAGE_KEY);
+    return null;
+  }
+};
+
+const writePayload = (payload) => {
+  const encrypted = CryptoJS.AES.encrypt(
+    JSON.stringify({ ...payload, storedAt: Date.now() }),
+    deriveKey()
+  ).toString();
+  localStorage.setItem(STORAGE_KEY, encrypted);
+};
+
+export const setAuthTokens = (accessToken, refreshToken, user) => {
+  writePayload({ accessToken, refreshToken, user });
+};
+
+export const getAuthPayload = () => readPayload();
+
 export const getAccessToken = () => {
-  // Try new format first
-  const accessToken = localStorage.getItem("accessToken");
-  if (accessToken) return accessToken;
-  
-  // Fallback to legacy format for backward compatibility
+  const payload = readPayload();
+  if (payload?.accessToken) {
+    return payload.accessToken;
+  }
   return localStorage.getItem("token");
 };
 
-/**
- * Get refresh token
- */
 export const getRefreshToken = () => {
+  const payload = readPayload();
+  if (payload?.refreshToken) {
+    return payload.refreshToken;
+  }
   return localStorage.getItem("refreshToken");
 };
 
-/**
- * Get user data
- */
 export const getUser = () => {
-  const userStr = localStorage.getItem("user");
-  return userStr ? JSON.parse(userStr) : null;
+  const payload = readPayload();
+  if (payload?.user) {
+    return payload.user;
+  }
+  const legacyUser = localStorage.getItem("user");
+  return legacyUser ? JSON.parse(legacyUser) : null;
 };
 
-/**
- * Clear all authentication data
- */
 export const clearAuth = () => {
-  localStorage.removeItem("accessToken");
-  localStorage.removeItem("refreshToken");
-  localStorage.removeItem("token"); // Legacy support
-  localStorage.removeItem("user");
+  localStorage.removeItem(STORAGE_KEY);
+  LEGACY_KEYS.forEach((key) => localStorage.removeItem(key));
 };
 
-/**
- * Check if user is authenticated
- */
-export const isAuthenticated = () => {
-  return !!getAccessToken();
-};
+export const isAuthenticated = () => !!getAccessToken();
 
-/**
- * Refresh access token using refresh token
- */
 export const refreshAccessToken = async () => {
   const refreshToken = getRefreshToken();
-  
+
   if (!refreshToken) {
     throw new Error("No refresh token available");
   }
 
   try {
-    const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:5001/api'}/auth/refresh`, {
+    const response = await fetch(`${process.env.REACT_APP_API_URL || "http://localhost:5001/api"}/auth/refresh`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -77,34 +91,27 @@ export const refreshAccessToken = async () => {
     }
 
     const data = await response.json();
-    
-    // Update tokens
-    localStorage.setItem("accessToken", data.accessToken);
-    localStorage.setItem("refreshToken", data.refreshToken);
-    
+    const payload = readPayload() || {};
+    writePayload({ ...payload, accessToken: data.accessToken, refreshToken: data.refreshToken });
+
     return {
       accessToken: data.accessToken,
       refreshToken: data.refreshToken,
     };
   } catch (error) {
-    // If refresh fails, clear auth and redirect to login
     clearAuth();
     window.location.href = "/login";
     throw error;
   }
 };
 
-/**
- * Logout user
- */
 export const logout = async () => {
   const accessToken = getAccessToken();
   const refreshToken = getRefreshToken();
 
   try {
-    // Call logout endpoint to blacklist tokens
     if (accessToken) {
-      await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:5001/api'}/auth/logout`, {
+      await fetch(`${process.env.REACT_APP_API_URL || "http://localhost:5001/api"}/auth/logout`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -116,7 +123,6 @@ export const logout = async () => {
   } catch (error) {
     console.error("Logout error:", error);
   } finally {
-    // Clear local storage regardless of API call success
     clearAuth();
   }
 };

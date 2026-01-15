@@ -1,463 +1,380 @@
 const express = require("express");
-const db = require("../db");
+const mongoose = require("mongoose");
 const authMiddleware = require("../middleware/authMiddleware");
 const Exam = require("../models/Exam");
 const Answer = require("../models/Answer");
-const multer = require('multer');
+const Violation = require("../models/Violation");
+
 const router = express.Router();
 
-// Configure multer for file uploads (JSON import)
-const upload = multer({ 
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype === 'application/json' || file.originalname.endsWith('.json')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only JSON files are allowed'));
-    }
-  }
+const sanitizeQuestion = (question, index) => ({
+  questionIndex: index,
+  prompt: question.prompt,
+  options: question.options,
+  category: question.category,
+  difficulty: question.difficulty,
 });
 
-// Get all exams
-router.get("/", async (req, res) => {
-  try {
-    const token = req.header("Authorization")?.replace("Bearer ", "");
-    let exams = await db.findExams({ isActive: true });
-
-    // If user is logged in, check if they've completed exams
-    if (token) {
-      try {
-        const jwt = require("jsonwebtoken");
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || "your-secret-key");
-        const Answer = require("../models/Answer");
-        
-        // Get all answers for this user
-        const userAnswers = await Answer.find({ studentId: decoded.userId });
-        const completedExamIds = new Set(userAnswers.map(a => a.examId.toString()));
-
-        // Enrich exams with completion status
-        exams = exams.map(exam => {
-          const examObj = exam.toObject ? exam.toObject() : exam;
-          return {
-            ...examObj,
-            hasCompleted: completedExamIds.has(examObj._id.toString()),
-            canTake: !completedExamIds.has(examObj._id.toString()) && 
-                     (!examObj.startDate || new Date(examObj.startDate) <= new Date()) &&
-                     (!examObj.endDate || new Date(examObj.endDate) >= new Date())
-          };
-        });
-      } catch (err) {
-        // If token is invalid, just return exams without completion status
-      }
-    }
-
-    res.json(exams);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+const sanitizeExamMeta = (exam) => ({
+  id: exam._id,
+  title: exam.title,
+  company: exam.company,
+  type: exam.type,
+  description: exam.description,
+  duration: exam.duration,
+  maxViolations: exam.maxViolations,
+  passingPercentage: exam.passingPercentage,
+  instructions: exam.instructions,
+  questionCount: exam.questions.length,
+  isActive: exam.isActive,
+  createdAt: exam.createdAt,
+  updatedAt: exam.updatedAt,
 });
 
-// Get active exam (first active exam found)
-router.get("/active", async (req, res) => {
+const validateObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
+
+// Student dashboard view of available/completed exams
+router.get("/available", authMiddleware, async (req, res) => {
   try {
-    const exam = await db.findExam({ isActive: true });
-    if (!exam) {
-      return res.status(404).json({ message: "No active exam found" });
-    }
-    res.json(exam);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+    const [activeExams, attempts] = await Promise.all([
+      Exam.find({ isActive: true }).sort({ createdAt: -1 }).lean(),
+      Answer.find({ studentId: req.userId }).lean(),
+    ]);
 
-// Get available exams (simplified version for dashboard)
-router.get("/available", async (req, res) => {
-  try {
-    const exams = await Exam.find({ isActive: true }).select(
-      "_id title company type duration"
-    );
-    res.json(exams);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get single exam
-router.get("/:id", async (req, res) => {
-  try {
-    const exam = await db.findExam({ _id: req.params.id });
-    if (!exam) {
-      return res.status(404).json({ error: "Exam not found" });
-    }
-    res.json(exam);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Fetch Quiz by ID (Start Exam)
-router.get("/:id/start", authMiddleware, async (req, res) => {
-  try {
-    const exam = await Exam.findById(req.params.id);
-    if (!exam) {
-      return res.status(404).json({ error: "Exam not found" });
-    }
-
-    // Check if exam is active
-    if (!exam.isActive) {
-      return res.status(403).json({ error: "This exam is not currently available" });
-    }
-
-    // Check if user has already submitted this exam (prevent re-attempts)
-    const existingSubmission = await Answer.findOne({
-      studentId: req.userId,
-      examId: req.params.id
+    const attemptedMap = new Map();
+    attempts.forEach((attempt) => {
+      attemptedMap.set(String(attempt.examId), attempt);
     });
 
-    if (existingSubmission) {
-      return res.status(403).json({ error: "You have already attempted this exam" });
+    const available = [];
+    const completed = [];
+    const examMetaById = new Map();
+
+    activeExams.forEach((exam) => {
+      const meta = sanitizeExamMeta(exam);
+      examMetaById.set(String(exam._id), meta);
+
+      const attempt = attemptedMap.get(String(exam._id));
+      if (!attempt || attempt.status === "in-progress") {
+        available.push({
+          ...meta,
+          hasCompleted: false,
+          canTake: exam.isActive,
+        });
+      } else {
+        completed.push({
+          examId: exam._id,
+          title: exam.title,
+          submittedAt: attempt.submittedAt,
+          score: attempt.percentage,
+          correctAnswers: attempt.correctAnswers,
+          totalQuestions: attempt.totalQuestions,
+          passed: attempt.percentage >= exam.passingPercentage,
+          status: attempt.status,
+        });
+      }
+    });
+
+    // Include completed exams that might no longer be active
+    const completedIds = attempts
+      .filter((attempt) => attempt.status !== "in-progress")
+      .map((attempt) => attempt.examId);
+
+    const missingExamIds = completedIds.filter(
+      (id) => !examMetaById.has(String(id))
+    );
+
+    if (missingExamIds.length) {
+      const pastExams = await Exam.find({ _id: { $in: missingExamIds } })
+        .select("title passingPercentage questions")
+        .lean();
+      pastExams.forEach((exam) => {
+        examMetaById.set(String(exam._id), sanitizeExamMeta(exam));
+      });
     }
 
-    // Return exam data for starting
-    res.json(exam);
+    const completedDetailed = attempts
+      .filter((attempt) => attempt.status !== "in-progress")
+      .map((attempt) => {
+        const exam = examMetaById.get(String(attempt.examId));
+        const passingPercentage = exam?.passingPercentage ?? 60;
+        return {
+          examId: attempt.examId,
+          title: exam?.title ?? "Exam",
+          submittedAt: attempt.submittedAt,
+          score: attempt.percentage,
+          correctAnswers: attempt.correctAnswers,
+          totalQuestions: attempt.totalQuestions,
+          passed: attempt.percentage >= passingPercentage,
+          grade:
+            attempt.percentage >= 90
+              ? "A"
+              : attempt.percentage >= 80
+              ? "B"
+              : attempt.percentage >= 70
+              ? "C"
+              : attempt.percentage >= 60
+              ? "D"
+              : "F",
+        };
+      });
+
+    const avgScore = completedDetailed.length
+      ? completedDetailed.reduce((sum, entry) => sum + entry.score, 0) /
+        completedDetailed.length
+      : 0;
+
+    res.json({
+      available,
+      completed: completedDetailed,
+      stats: {
+        totalAvailable: available.length,
+        totalCompleted: completedDetailed.length,
+        averageScore: Number(avgScore.toFixed(2)),
+      },
+    });
   } catch (error) {
-    console.error("Start exam error:", error);
-    res.status(500).json({ error: "Failed to start exam. Please try again." });
+    res.status(500).json({ error: "Failed to load exam dashboard." });
   }
 });
 
-// Import exam from JSON (instructor only)
-router.post("/import", authMiddleware, upload.single('examFile'), async (req, res) => {
+// Instructor/Admin list of exams
+router.get("/", authMiddleware, async (req, res) => {
   try {
-    if (req.role !== "instructor" && req.role !== "admin") {
-      return res.status(403).json({ error: "Only instructors can import exams" });
+    if (!["instructor", "admin"].includes(req.role)) {
+      return res.status(403).json({ error: "Instructor or admin access required." });
     }
 
-    if (!req.file) {
-      return res.status(400).json({ error: "No file uploaded" });
-    }
+    const match = req.role === "instructor" ? { instructor: req.userId } : {};
+    const exams = await Exam.find(match).sort({ createdAt: -1 }).lean();
+    const examIds = exams.map((exam) => exam._id);
 
-    let examData;
-    try {
-      examData = JSON.parse(req.file.buffer.toString('utf8'));
-    } catch (parseError) {
-      return res.status(400).json({ error: "Invalid JSON file format" });
-    }
+    const analytics = await Answer.aggregate([
+      { $match: { examId: { $in: examIds } } },
+      {
+        $group: {
+          _id: "$examId",
+          attempts: { $sum: 1 },
+          submitted: {
+            $sum: {
+              $cond: [{ $in: ["$status", ["submitted", "auto-submitted"]] }, 1, 0],
+            },
+          },
+          avgScore: { $avg: "$percentage" },
+        },
+      },
+    ]);
 
-    // Validate exam data structure
-    if (!examData.title || !examData.duration || !examData.questions || !Array.isArray(examData.questions)) {
-      return res.status(400).json({ error: "Invalid exam format. Required: title, duration, questions array" });
-    }
+    const analyticsMap = new Map();
+    analytics.forEach((entry) => {
+      analyticsMap.set(String(entry._id), entry);
+    });
 
-    // Format questions to match schema
-    const formattedQuestions = examData.questions.map((q, index) => {
-      // Support both formats: {question, options, correct} and {questionText, options, correctAnswer}
-      const questionText = q.question || q.questionText || q.text;
-      const options = q.options || [];
-      const correctAnswer = q.correct !== undefined 
-        ? options[q.correct] 
-        : (q.correctAnswer || q.correct);
+    const response = exams.map((exam) => {
+      const meta = sanitizeExamMeta(exam);
+      const examAnalytics = analyticsMap.get(String(exam._id)) || {
+        attempts: 0,
+        submitted: 0,
+        avgScore: 0,
+      };
 
       return {
-        questionId: q.questionId || `q${index + 1}`,
-        questionText: questionText,
-        questionType: q.questionType || "mcq",
-        options: options,
-        correctAnswer: correctAnswer,
-        marks: q.marks || 1,
-        explanation: q.explanation || ""
+        ...meta,
+        totalQuestions: exam.questions.length,
+        enrolledStudents: examAnalytics.attempts,
+        submittedAttempts: examAnalytics.submitted,
+        averageScore: Number((examAnalytics.avgScore || 0).toFixed(2)),
+        status: exam.isActive ? "Active" : "Inactive",
       };
     });
 
-    const exam = await db.createExam({
-      title: examData.title,
-      description: examData.description || "",
-      duration: parseInt(examData.duration),
-      totalQuestions: formattedQuestions.length,
-      passingPercentage: examData.passingPercentage || 60,
-      questions: formattedQuestions,
-      instructor: req.userId,
-      startDate: examData.startDate ? new Date(examData.startDate) : new Date(),
-      endDate: examData.endDate ? new Date(examData.endDate) : null,
-      isActive: examData.isActive !== undefined ? examData.isActive : true,
-      proctoring: {
-        enabled: examData.proctoring?.enabled !== undefined ? examData.proctoring.enabled : true,
-        recordWebcam: examData.proctoring?.recordWebcam || false,
-        allowTabSwitch: examData.proctoring?.allowTabSwitch || false,
-        maxAttempts: examData.proctoring?.maxAttempts || 1,
-        maxViolations: examData.proctoring?.maxViolations || 5
-      }
-    });
-
-    res.status(201).json({
-      message: "Exam imported successfully",
-      exam: exam
-    });
+    res.json(response);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: "Failed to load exams." });
   }
 });
 
-// Create exam (instructor only)
-router.post("/", authMiddleware, async (req, res) => {
+// Start exam: return sanitized questions and ensure attempt exists
+router.get("/:id/start", authMiddleware, async (req, res) => {
   try {
-    if (req.role !== "instructor" && req.role !== "admin") {
-      return res.status(403).json({ error: "Only instructors can create exams" });
+    if (!validateObjectId(req.params.id)) {
+      return res.status(400).json({ error: "Invalid exam id." });
     }
 
-    const {
-      title,
-      description,
-      duration,
-      passingPercentage,
-      questions,
-      startTime,
-      endTime,
-      instructions,
-      course,
-      subject,
-      maxViolations
-    } = req.body;
-
-    // Validate required fields
-    if (!title || !duration || !questions || questions.length === 0) {
-      return res.status(400).json({ error: "Title, duration, and at least one question are required" });
-    }
-
-    // Map questions to match schema
-    const formattedQuestions = questions.map((q, index) => ({
-      questionId: q.questionId || `q${index + 1}`,
-      questionText: q.questionText,
-      questionType: q.questionType || "mcq",
-      options: q.options || [],
-      correctAnswer: q.correctAnswer,
-      marks: q.marks || 1,
-      explanation: q.explanation || ""
-    }));
-
-    const examData = {
-      title,
-      description: description || "",
-      duration: parseInt(duration),
-      totalQuestions: questions.length,
-      passingPercentage: passingPercentage || 60,
-      questions: formattedQuestions,
-      instructor: req.userId,
-      startDate: startTime ? new Date(startTime) : new Date(),
-      endDate: endTime ? new Date(endTime) : null,
-      isActive: true,
-      proctoring: {
-        enabled: true,
-        recordWebcam: false,
-        allowTabSwitch: false,
-        maxAttempts: 1,
-        maxViolations: maxViolations || 5
-      }
-    };
-
-    const exam = await db.createExam(examData);
-    res.status(201).json(exam);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Update exam (instructor only) - for activation/deactivation
-router.put("/:id", authMiddleware, async (req, res) => {
-  try {
-    if (req.role !== "instructor" && req.role !== "admin") {
-      return res.status(403).json({ error: "Only instructors can update exams" });
-    }
-
-    const exam = await Exam.findById(req.params.id);
+    const exam = await Exam.findById(req.params.id).lean();
     if (!exam) {
-      return res.status(404).json({ error: "Exam not found" });
+      return res.status(404).json({ error: "Exam not found." });
     }
 
-    // Check if instructor owns this exam
-    if (exam.instructor.toString() !== req.userId && req.role !== "admin") {
-      return res.status(403).json({ error: "Not authorized to update this exam" });
+    if (!exam.isActive) {
+      return res.status(403).json({ error: "Exam is not currently active." });
     }
 
-    const { isActive, maxViolations, duration, passingPercentage } = req.body;
+    const existingAttempt = await Answer.findOne({
+      examId: req.params.id,
+      studentId: req.userId,
+    });
 
-    if (isActive !== undefined) exam.isActive = isActive;
-    if (maxViolations !== undefined) exam.proctoring.maxViolations = maxViolations;
-    if (duration !== undefined) exam.duration = duration;
-    if (passingPercentage !== undefined) exam.passingPercentage = passingPercentage;
+    if (existingAttempt && existingAttempt.status !== "in-progress") {
+      return res
+        .status(403)
+        .json({ error: "You have already submitted this exam." });
+    }
 
-    await exam.save();
+    let attempt = existingAttempt;
+    if (!attempt) {
+      attempt = await Answer.create({
+        studentId: req.userId,
+        examId: exam._id,
+        totalQuestions: exam.questions.length,
+        timeRemaining: exam.duration * 60,
+      });
+    }
+
+    const sanitizedQuestions = exam.questions.map((question, index) =>
+      sanitizeQuestion(question, index)
+    );
 
     res.json({
-      message: "Exam updated successfully",
-      exam: exam
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Submit exam answers
-router.post("/:examId/submit", authMiddleware, async (req, res) => {
-  try {
-    const { examId } = req.params;
-    const { answers } = req.body;
-
-    const exam = await Exam.findById(examId);
-    if (!exam) {
-      return res.status(404).json({ error: "Exam not found" });
-    }
-
-    // Check if exam is active
-    if (!exam.isActive) {
-      return res.status(400).json({ error: "This exam is not currently active" });
-    }
-
-    // Calculate score
-    let correctAnswers = 0;
-    const evaluatedAnswers = answers.map((ans) => {
-      const questionIndex = parseInt(ans.questionId);
-      const question = exam.questions[questionIndex];
-      const isCorrect = question && question.correct === parseInt(ans.answer);
-      if (isCorrect) correctAnswers++;
-      return ans;
-    });
-
-    const score = (correctAnswers / exam.questions.length) * 100;
-
-    // Check if student already submitted
-    const existingSubmission = await Answer.findOne({
-      studentId: req.userId,
-      examId,
-    });
-
-    if (existingSubmission) {
-      return res.status(400).json({ error: "Exam already submitted" });
-    }
-
-    const submission = new Answer({
-      studentId: req.userId,
-      examId,
-      answers: evaluatedAnswers,
-      score,
-      totalQuestions: exam.questions.length,
-      correctAnswers,
-      submittedAt: new Date(),
-    });
-
-    await submission.save();
-
-    res.status(201).json({
-      message: "Exam submitted successfully",
-      submission: {
-        id: submission._id,
-        score,
-        totalQuestions: exam.questions.length,
-        correctAnswers,
-        submittedAt: submission.submittedAt,
+      exam: sanitizeExamMeta(exam),
+      questions: sanitizedQuestions,
+      progress: {
+        answers: (attempt.answers || []).map((item) => ({
+          questionIndex: item.questionIndex,
+          selectedOption: item.selectedOption,
+          timeSpent: item.timeSpent,
+        })),
+        timeRemaining: attempt.timeRemaining ?? exam.duration * 60,
+        startedAt: attempt.startedAt,
+        lastSavedAt: attempt.lastSavedAt,
       },
-      score,
-      passed: score >= exam.passingPercentage,
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: "Failed to start exam." });
   }
 });
 
-// Get exam results
+// Student fetch results
 router.get("/:examId/results", authMiddleware, async (req, res) => {
   try {
-    const { examId } = req.params;
-
-    const result = await Answer.findOne({
-      examId,
-      studentId: req.userId,
-    }).populate('examId', 'title passingPercentage');
-
-    if (!result) {
-      return res.status(404).json({ error: "No submission found for this exam" });
+    if (!validateObjectId(req.params.examId)) {
+      return res.status(400).json({ error: "Invalid exam id." });
     }
 
-    const exam = await Exam.findById(examId);
-    const passed = result.score >= (exam?.passingPercentage || 60);
+    const record = await Answer.findOne({
+      examId: req.params.examId,
+      studentId: req.userId,
+    })
+      .populate("examId", "title passingPercentage duration")
+      .lean();
+
+    if (!record || !["submitted", "auto-submitted"].includes(record.status)) {
+      return res.status(404).json({ error: "No submitted attempt found." });
+    }
+
+    const exam = record.examId;
+    const passed = record.percentage >= (exam?.passingPercentage ?? 60);
 
     res.json({
-      ...result.toObject(),
+      exam: {
+        id: exam?._id ?? req.params.examId,
+        title: exam?.title ?? "Exam",
+        passingPercentage: exam?.passingPercentage ?? 60,
+      },
+      score: record.percentage,
+      correctAnswers: record.correctAnswers,
+      totalQuestions: record.totalQuestions,
+      submittedAt: record.submittedAt,
       passed,
-      grade: result.score >= 90 ? 'A' : 
-             result.score >= 80 ? 'B' : 
-             result.score >= 70 ? 'C' : 
-             result.score >= 60 ? 'D' : 'F',
-      timeTaken: result.submittedAt && result.createdAt ? 
-                 Math.floor((new Date(result.submittedAt) - new Date(result.createdAt)) / 1000) : 0
+      grade:
+        record.percentage >= 90
+          ? "A"
+          : record.percentage >= 80
+          ? "B"
+          : record.percentage >= 70
+          ? "C"
+          : record.percentage >= 60
+          ? "D"
+          : "F",
+      durationUsed: record.durationUsed,
+      violationsCount: record.violationsCount,
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: "Failed to fetch results." });
   }
 });
 
-// Submit exam answers
-router.post("/submit", authMiddleware, async (req, res) => {
+// Instructor/Admin results summary per exam
+router.get("/:examId/summary", authMiddleware, async (req, res) => {
   try {
-    const { examId, answers } = req.body;
-
-    if (!examId || !answers) {
-      return res.status(400).json({ error: "Exam ID and answers are required" });
+    if (!validateObjectId(req.params.examId)) {
+      return res.status(400).json({ error: "Invalid exam id." });
     }
 
-    // Get the exam to calculate score
-    const exam = await Exam.findById(examId);
+    if (!["instructor", "admin"].includes(req.role)) {
+      return res.status(403).json({ error: "Instructor or admin access required." });
+    }
+
+    const exam = await Exam.findById(req.params.examId).lean();
     if (!exam) {
-      return res.status(404).json({ error: "Exam not found" });
+      return res.status(404).json({ error: "Exam not found." });
     }
 
-    // Calculate score
-    let correctAnswers = 0;
-    const totalQuestions = exam.questions.length;
-
-    exam.questions.forEach(question => {
-      const userAnswer = answers[question.id];
-      if (userAnswer === question.correct) {
-        correctAnswers++;
-      }
-    });
-
-    const score = Math.round((correctAnswers / totalQuestions) * 100);
-
-    // Save or update answer
-    const existingAnswer = await Answer.findOne({
-      examId,
-      studentId: req.userId
-    });
-
-    if (existingAnswer) {
-      // Update existing submission
-      existingAnswer.answers = answers;
-      existingAnswer.score = score;
-      existingAnswer.submittedAt = new Date();
-      await existingAnswer.save();
-    } else {
-      // Create new submission
-      const answer = new Answer({
-        examId,
-        studentId: req.userId,
-        answers,
-        score,
-        submittedAt: new Date()
-      });
-      await answer.save();
+    if (req.role === "instructor" && String(exam.instructor) !== req.userId) {
+      return res.status(403).json({ error: "Not authorized to view this exam." });
     }
+
+    const attempts = await Answer.find({ examId: req.params.examId })
+      .select(
+        "studentId status percentage correctAnswers totalQuestions submittedAt autoSubmitted autoSubmitReason"
+      )
+      .populate("studentId", "name email")
+      .lean();
+
+    const violations = await Violation.countDocuments({ examId: req.params.examId });
 
     res.json({
-      message: "Exam submitted successfully",
-      score,
-      correctAnswers,
-      totalQuestions,
-      passed: score >= (exam.passingPercentage || 60)
+      exam: sanitizeExamMeta(exam),
+      attempts,
+      violationCount: violations,
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: "Failed to fetch summary." });
+  }
+});
+
+// Exam summary for instruction screen
+router.get("/:id", authMiddleware, async (req, res) => {
+  try {
+    if (!validateObjectId(req.params.id)) {
+      return res.status(400).json({ error: "Invalid exam id." });
+    }
+
+    const exam = await Exam.findById(req.params.id).lean();
+    if (!exam) {
+      return res.status(404).json({ error: "Exam not found." });
+    }
+
+    if (!exam.isActive && req.role === "student") {
+      return res.status(403).json({ error: "Exam is not active." });
+    }
+
+    const attempt = await Answer.findOne({
+      examId: req.params.id,
+      studentId: req.userId,
+    })
+      .select("status submittedAt timeRemaining")
+      .lean();
+
+    res.json({
+      ...sanitizeExamMeta(exam),
+      alreadyAttempted: attempt ? attempt.status !== "in-progress" : false,
+      attemptStatus: attempt?.status ?? null,
+      submittedAt: attempt?.submittedAt ?? null,
+      timeRemaining: attempt?.timeRemaining ?? exam.duration * 60,
+    });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch exam." });
   }
 });
 

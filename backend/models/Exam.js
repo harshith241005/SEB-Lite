@@ -1,90 +1,121 @@
 const mongoose = require("mongoose");
 
-const questionSchema = new mongoose.Schema({
-  question: {
-    type: String,
-    required: true
-  },
-  options: {
-    type: [String],
-    required: true,
-    validate: {
-      validator: function(v) {
-        return v && v.length >= 2;
-      },
-      message: 'Options must have at least 2 choices'
-    }
-  },
-  correct: {
-    type: Number,
-    required: true,
-    min: 0,
-    validate: {
-      validator: function(v) {
-        return Number.isInteger(v) && v < this.options.length;
-      },
-      message: 'Correct answer index must be valid for options'
-    }
-  },
-  category: {
-    type: String,
-    required: true,
-    enum: ['Java', 'DSA', 'DBMS', 'OS', 'SQL']
-  },
-  difficulty: {
-    type: String,
-    required: true,
-    enum: ['Easy', 'Medium', 'Hard']
-  }
-});
+const ALLOWED_CATEGORIES = ["Java", "DSA", "DBMS", "OS", "SQL"];
+const ALLOWED_DIFFICULTIES = ["Easy", "Medium", "Hard"];
 
-const examSchema = new mongoose.Schema({
-  title: {
-    type: String,
-    required: true
-  },
-  company: {
-    type: String,
-    required: true
-  },
-  type: {
-    type: String,
-    required: true,
-    enum: ['PLACEMENT_QUIZ', 'PRACTICE_TEST']
-  },
-  duration: {
-    type: Number,
-    required: true,
-    min: 1
-  },
-  maxViolations: {
-    type: Number,
-    required: true,
-    min: 0
-  },
-  isActive: {
-    type: Boolean,
-    default: true
-  },
-  questions: {
-    type: [questionSchema],
-    required: true,
-    validate: {
-      validator: function(v) {
-        return v && v.length > 0;
+const questionSchema = new mongoose.Schema(
+  {
+    prompt: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    options: {
+      type: [String],
+      required: true,
+      validate: {
+        validator(value) {
+          return Array.isArray(value) && value.length === 4;
+        },
+        message: "Each question must define exactly 4 options.",
       },
-      message: 'Questions array must not be empty'
-    }
+    },
+    correctOptionIndex: {
+      type: Number,
+      required: true,
+      min: 0,
+      max: 3,
+    },
+    category: {
+      type: String,
+      enum: ALLOWED_CATEGORIES,
+      required: true,
+    },
+    difficulty: {
+      type: String,
+      enum: ALLOWED_DIFFICULTIES,
+      required: true,
+    },
+    explanation: {
+      type: String,
+      default: "",
+      trim: true,
+    },
   },
-  instructor: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "User",
-    required: true
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now
-  }
-});
+  { _id: false }
+);
 
-module.exports = mongoose.model("Exam", examSchema);
+const examSchema = new mongoose.Schema(
+  {
+    title: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    company: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    type: {
+      type: String,
+      enum: ["PLACEMENT_QUIZ", "PRACTICE_TEST"],
+      default: "PLACEMENT_QUIZ",
+    },
+    description: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    duration: {
+      type: Number,
+      required: true,
+      min: 1,
+    },
+    maxViolations: {
+      type: Number,
+      required: true,
+      min: 1,
+    },
+    passingPercentage: {
+      type: Number,
+      default: 60,
+      min: 0,
+      max: 100,
+    },
+    instructions: {
+      type: [String],
+      default: [],
+    },
+    isActive: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
+    questions: {
+      type: [questionSchema],
+      validate: {
+        validator(value) {
+          return Array.isArray(value) && value.length > 0;
+        },
+        message: "An exam must contain at least one question.",
+      },
+      required: true,
+    },
+    instructor: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+  },
+  { timestamps: true }
+);
+
+examSchema.index({ title: 1, company: 1 });
+examSchema.index({ instructor: 1 });
+
+const Exam = mongoose.model("Exam", examSchema);
+
+module.exports = Exam;
+module.exports.ALLOWED_CATEGORIES = ALLOWED_CATEGORIES;
+module.exports.ALLOWED_DIFFICULTIES = ALLOWED_DIFFICULTIES;

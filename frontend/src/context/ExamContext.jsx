@@ -1,6 +1,4 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
-import axios from 'axios';
-import { API_ENDPOINTS, axiosConfig } from '../utils/api';
 
 const ExamContext = createContext();
 

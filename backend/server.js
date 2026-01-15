@@ -6,6 +6,9 @@ const connectDB = require("./config/db");
 const authRoutes = require("./routes/auth");
 const examRoutes = require("./routes/exam");
 const violationRoutes = require("./routes/violation");
+const answerRoutes = require("./routes/answer");
+const adminRoutes = require("./routes/admin");
+const { apiLimiter } = require("./middleware/rateLimiter");
 
 const app = express();
 
@@ -23,6 +26,9 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 console.log("✅ Body parsing middleware added");
 
+// Rate limiting for API surface
+app.use("/api", apiLimiter);
+
 // Routes
 app.use("/api/auth", authRoutes);
 console.log("✅ Auth routes mounted");
@@ -32,6 +38,12 @@ console.log("✅ Exam routes mounted");
 
 app.use("/api/violation", violationRoutes);
 console.log("✅ Violation routes mounted");
+
+app.use("/api/answer", answerRoutes);
+console.log("✅ Answer routes mounted");
+
+app.use("/api/admin", adminRoutes);
+console.log("✅ Admin routes mounted");
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {

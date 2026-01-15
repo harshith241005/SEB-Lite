@@ -2,17 +2,18 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { API_ENDPOINTS, axiosConfig } from "../utils/api";
+import { getUser, getAccessToken, clearAuth } from "../utils/auth";
 
 export default function StudentDashboard() {
-  const [exams, setExams] = useState([]);
-  const [results, setResults] = useState([]);
+  const [availableExams, setAvailableExams] = useState([]);
+  const [completedExams, setCompletedExams] = useState([]);
+  const [stats, setStats] = useState({ totalAvailable: 0, totalCompleted: 0, averageScore: 0 });
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('available');
   const navigate = useNavigate();
 
-  const token = localStorage.getItem("token");
-  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  const token = getAccessToken();
+  const user = getUser() || {};
 
   // Configure axios with auth header
   const authConfig = useMemo(() => ({
@@ -25,30 +26,21 @@ export default function StudentDashboard() {
 
   const fetchDashboardData = useCallback(async () => {
     try {
-      const [examsRes] = await Promise.all([
-        axios.get(API_ENDPOINTS.EXAMS_AVAILABLE, authConfig)
-      ]);
+      const response = await axios.get(API_ENDPOINTS.EXAMS_AVAILABLE, authConfig);
+      const data = response.data;
 
-      setExams(examsRes.data || []);
-
-      // Fetch results for completed exams
-      const completedExams = examsRes.data.filter(exam => exam.hasCompleted);
-      const resultsPromises = completedExams.map(exam =>
-        axios.get(API_ENDPOINTS.EXAM_RESULTS(exam._id), authConfig).catch(() => null)
-      );
-
-      const resultsData = await Promise.all(resultsPromises);
-      setResults(resultsData.filter(r => r).map(r => r.data));
-
-    } catch (error) {
-      console.error("Failed to fetch dashboard data:", error);
+      setAvailableExams(data.available || []);
+      setCompletedExams(data.completed || []);
+      setStats(data.stats || { totalAvailable: 0, totalCompleted: 0, averageScore: 0 });
+    } catch (err) {
+      console.error("Failed to fetch dashboard data:", err);
     } finally {
       setLoading(false);
     }
   }, [authConfig]);
 
   useEffect(() => {
-    if (!token || user.role !== 'student') {
+    if (!token || (user.role && user.role !== 'student')) {
       navigate("/login");
       return;
     }
@@ -56,8 +48,7 @@ export default function StudentDashboard() {
   }, [token, user.role, navigate, fetchDashboardData]);
 
   const handleLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
+    clearAuth();
     navigate("/login");
   };
 
@@ -75,23 +66,6 @@ export default function StudentDashboard() {
     });
   };
 
-  const getExamStatus = (exam) => {
-    if (exam.hasCompleted) return 'completed';
-    if (exam.canTake) return 'available';
-    if (exam.isActive) return 'enrolled';
-    return 'upcoming';
-  };
-
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'available': return 'bg-green-100 text-green-800';
-      case 'enrolled': return 'bg-blue-100 text-blue-800';
-      case 'completed': return 'bg-gray-100 text-gray-800';
-      case 'upcoming': return 'bg-yellow-100 text-yellow-800';
-      default: return 'bg-gray-100 text-gray-800';
-    }
-  };
-
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-100">
@@ -99,9 +73,6 @@ export default function StudentDashboard() {
       </div>
     );
   }
-
-  const availableExams = exams.filter(exam => getExamStatus(exam) === 'available');
-  const completedExams = exams.filter(exam => exam.hasCompleted);
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -135,7 +106,7 @@ export default function StudentDashboard() {
               </div>
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-600">Available Exams</p>
-                <p className="text-2xl font-bold text-gray-900">{availableExams.length}</p>
+                <p className="text-2xl font-bold text-gray-900">{stats.totalAvailable}</p>
               </div>
             </div>
           </div>
@@ -147,7 +118,7 @@ export default function StudentDashboard() {
               </div>
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-600">Completed</p>
-                <p className="text-2xl font-bold text-gray-900">{completedExams.length}</p>
+                <p className="text-2xl font-bold text-gray-900">{stats.totalCompleted}</p>
               </div>
             </div>
           </div>
@@ -159,12 +130,7 @@ export default function StudentDashboard() {
               </div>
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-600">Average Score</p>
-                <p className="text-2xl font-bold text-gray-900">
-                  {results.length > 0
-                    ? (results.reduce((acc, r) => acc + r.score, 0) / results.length).toFixed(1)
-                    : 0
-                  }%
-                </p>
+                <p className="text-2xl font-bold text-gray-900">{stats.averageScore}%</p>
               </div>
             </div>
           </div>
@@ -230,18 +196,18 @@ export default function StudentDashboard() {
               <p className="text-sm text-gray-600">Your performance on completed exams</p>
             </div>
             <div className="divide-y divide-gray-200">
-              {results.length === 0 ? (
+              {completedExams.length === 0 ? (
                 <div className="px-6 py-8 text-center text-gray-500">
                   No exam results available yet. Complete some exams to see your results here.
                 </div>
               ) : (
-                results.map((result) => (
-                  <div key={result.exam} className="px-6 py-4 hover:bg-gray-50">
+                completedExams.map((result, index) => (
+                  <div key={result.examId || index} className="px-6 py-4 hover:bg-gray-50">
                     <div className="flex items-center justify-between">
                       <div className="flex-1">
                         <div className="flex items-center mb-2">
                           <h4 className="text-lg font-medium text-gray-900 mr-3">
-                            {result.exam?.title || 'Exam'}
+                            {result.title || 'Exam'}
                           </h4>
                           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                             result.passed ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
@@ -252,33 +218,26 @@ export default function StudentDashboard() {
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                           <div>
                             <p className="text-gray-500">Score</p>
-                            <p className="font-semibold text-gray-900">{result.score.toFixed(1)}%</p>
+                            <p className="font-semibold text-gray-900">{(result.score || 0).toFixed(1)}%</p>
                           </div>
                           <div>
                             <p className="text-gray-500">Correct Answers</p>
                             <p className="font-semibold text-gray-900">
-                              {result.correctAnswers}/{result.totalQuestions}
+                              {result.correctAnswers || 0}/{result.totalQuestions || 0}
                             </p>
                           </div>
                           <div>
                             <p className="text-gray-500">Grade</p>
-                            <p className="font-semibold text-gray-900">{result.grade}</p>
+                            <p className="font-semibold text-gray-900">{result.grade || 'N/A'}</p>
                           </div>
                           <div>
-                            <p className="text-gray-500">Time Taken</p>
-                            <p className="font-semibold text-gray-900">
-                              {Math.floor(result.timeTaken / 60)}:{(result.timeTaken % 60).toString().padStart(2, '0')}
-                            </p>
+                            <p className="text-gray-500">Status</p>
+                            <p className="font-semibold text-gray-900">{result.status || 'Submitted'}</p>
                           </div>
                         </div>
                         <p className="text-xs text-gray-400 mt-2">
                           Submitted: {formatDate(result.submittedAt)}
                         </p>
-                      </div>
-                      <div className="ml-4">
-                        <button className="text-blue-600 hover:text-blue-800 text-sm font-medium">
-                          View Details
-                        </button>
                       </div>
                     </div>
                   </div>

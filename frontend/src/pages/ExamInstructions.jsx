@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { useNavigate, useParams } from "react-router-dom";
 import { API_ENDPOINTS, axiosConfig } from "../utils/api";
+import { getAccessToken, getUser } from "../utils/auth";
 
 export default function ExamInstructions() {
   const [exam, setExam] = useState(null);
@@ -12,8 +13,8 @@ export default function ExamInstructions() {
   const navigate = useNavigate();
   const { examId } = useParams();
 
-  const token = localStorage.getItem("token");
-  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  const token = getAccessToken();
+  const user = getUser() || {};
 
   const authConfig = {
     ...axiosConfig,
@@ -24,7 +25,7 @@ export default function ExamInstructions() {
   };
 
   useEffect(() => {
-    if (!token || user.role !== 'student') {
+    if (!token || (user.role && user.role !== 'student')) {
       navigate("/login");
       return;
     }
@@ -42,6 +43,7 @@ export default function ExamInstructions() {
     };
 
     fetchExam();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [examId, token, user.role, navigate]);
 
   useEffect(() => {

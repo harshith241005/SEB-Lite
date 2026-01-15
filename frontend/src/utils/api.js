@@ -4,28 +4,38 @@ import { getAccessToken, refreshAccessToken, clearAuth } from './auth';
 // API Configuration
 export const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001/api';
 
-// API Endpoints
+// API Endpoints - returns full URL
 export const API_ENDPOINTS = {
   // Authentication
-  LOGIN: '/auth/login',
-  REGISTER: '/auth/register',
-  PROFILE: '/auth/profile',
-  REFRESH: '/auth/refresh',
-  LOGOUT: '/auth/logout',
+  LOGIN: `${API_BASE_URL}/auth/login`,
+  REGISTER: `${API_BASE_URL}/auth/register`,
+  PROFILE: `${API_BASE_URL}/auth/profile`,
+  REFRESH: `${API_BASE_URL}/auth/refresh`,
+  LOGOUT: `${API_BASE_URL}/auth/logout`,
 
   // Exams
-  EXAMS: '/exam',
-  EXAMS_AVAILABLE: '/exam/available',
-  EXAM_BY_ID: (id) => `/exam/${id}`,
-  SUBMIT_EXAM: (id) => `/exam/${id}/submit`,
-  EXAM_RESULTS: (id) => `/exam/${id}/results`,
+  EXAMS: `${API_BASE_URL}/exam`,
+  EXAMS_AVAILABLE: `${API_BASE_URL}/exam/available`,
+  EXAM_BY_ID: (id) => `${API_BASE_URL}/exam/${id}`,
+  EXAM_START: (id) => `${API_BASE_URL}/exam/${id}/start`,
+  SUBMIT_EXAM: (id) => `${API_BASE_URL}/exam/${id}/submit`,
+  EXAM_RESULTS: (id) => `${API_BASE_URL}/exam/${id}/results`,
+
+  // Answers
+  ANSWER_SAVE: `${API_BASE_URL}/answer/save`,
+  ANSWER_SUBMIT: `${API_BASE_URL}/answer/submit`,
+  ANSWER_PROGRESS: (examId) => `${API_BASE_URL}/answer/${examId}/progress`,
 
   // Violations
-  VIOLATIONS: '/violation',
-  VIOLATION_STATS: '/violation/stats',
+  VIOLATIONS: `${API_BASE_URL}/violation`,
+  VIOLATION_STATS: `${API_BASE_URL}/violation/stats`,
+
+  // Admin
+  ADMIN_UPLOAD_EXAM: `${API_BASE_URL}/admin/upload-exam`,
+  ADMIN_TOGGLE_EXAM: `${API_BASE_URL}/admin/toggle-exam`,
 };
 
-// Helper function to get full API URL
+// Helper function to get full API URL (deprecated - use API_ENDPOINTS directly)
 export const getApiUrl = (endpoint) => {
   return `${API_BASE_URL}${endpoint}`;
 };

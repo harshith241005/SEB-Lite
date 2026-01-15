@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { API_ENDPOINTS, axiosConfig } from "../utils/api";
+import { getUser, getAccessToken, clearAuth } from "../utils/auth";
 
 export default function InstructorDashboard() {
   const [exams, setExams] = useState([]);
@@ -11,8 +12,8 @@ export default function InstructorDashboard() {
   const [activeTab, setActiveTab] = useState('exams');
   const navigate = useNavigate();
 
-  const token = localStorage.getItem("token");
-  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  const token = getAccessToken();
+  const user = getUser() || {};
 
   // Configure axios with auth header
   const authConfig = useMemo(() => ({
@@ -31,7 +32,7 @@ export default function InstructorDashboard() {
         axios.get(`${API_ENDPOINTS.VIOLATION_STATS}?timeframe=24h`, authConfig)
       ]);
 
-      setExams(examsRes.data || []);
+      setExams(examsRes.data?.exams || examsRes.data || []);
       setViolations(violationsRes.data?.violations || violationsRes.data || []);
       setStats(statsRes.data || {});
     } catch (error) {
@@ -42,7 +43,7 @@ export default function InstructorDashboard() {
   }, [authConfig]);
 
   useEffect(() => {
-    if (!token || user.role !== 'instructor') {
+    if (!token || (user.role && !['instructor', 'admin'].includes(user.role))) {
       navigate("/login");
       return;
     }
@@ -51,8 +52,7 @@ export default function InstructorDashboard() {
   }, [token, user.role, navigate]);
 
   const handleLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
+    clearAuth();
     navigate("/login");
   };
 

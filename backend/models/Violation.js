@@ -6,62 +6,55 @@ const violationSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
+      index: true,
     },
     examId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Exam",
       required: true,
+      index: true,
     },
-    type: {
+    violationType: {
       type: String,
-      enum: [
-        "WINDOW_BLUR",
-        "SHORTCUT",
-        "TAB_SWITCH",
-        "COPY_PASTE",
-        "RIGHT_CLICK",
-        "DEV_TOOLS",
-        "FULLSCREEN_EXIT",
-        "MULTIPLE_MONITORS",
-        "SUSPICIOUS_PROCESS",
-        "NETWORK_BLOCK",
-        "TIME_MANIPULATION",
-      ],
+      enum: ["WINDOW_BLUR", "SHORTCUT_ATTEMPT"],
       required: true,
+      index: true,
     },
     severity: {
       type: String,
       enum: ["low", "medium", "high"],
-      default: "low",
+      default: "medium",
     },
-    description: String,
-    timestamp: {
+    description: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    occurredAt: {
       type: Date,
       default: Date.now,
+      index: true,
     },
-    screenshot: String, // URL to screenshot
-    metadata: mongoose.Schema.Types.Mixed,
-    evidence: mongoose.Schema.Types.Mixed,
-    ipAddress: String,
-    sessionId: String,
-    reviewed: {
+    metadata: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
+    ipAddress: {
+      type: String,
+      default: null,
+    },
+    sessionId: {
+      type: String,
+      default: null,
+    },
+    autoSubmitted: {
       type: Boolean,
       default: false,
     },
-    reviewedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-    },
-    reviewNotes: String,
-    reviewedAt: Date,
   },
   { timestamps: true }
 );
 
-// Indexes for performance
-violationSchema.index({ studentId: 1, examId: 1 }); // For violations by student per exam
-violationSchema.index({ examId: 1, timestamp: 1 }); // For violations during exam timeline
-violationSchema.index({ violationType: 1 }); // For filtering by violation type
-violationSchema.index({ timestamp: -1 }); // For recent violations
+violationSchema.index({ studentId: 1, examId: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Violation", violationSchema);

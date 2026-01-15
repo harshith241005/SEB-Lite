@@ -2,6 +2,7 @@ import React, { useState, useRef } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { API_ENDPOINTS, axiosConfig } from "../utils/api";
+import { getAccessToken } from "../utils/auth";
 
 export default function CreateExam() {
   const [formData, setFormData] = useState({
@@ -33,7 +34,7 @@ export default function CreateExam() {
   const fileInputRef = useRef(null);
   const navigate = useNavigate();
 
-  const token = localStorage.getItem("token");
+  const token = getAccessToken();
 
   // Configure axios with auth header
   const authConfig = {
@@ -126,14 +127,14 @@ export default function CreateExam() {
       const formData = new FormData();
       formData.append('examFile', file);
 
-      const token = localStorage.getItem("token");
-      const response = await axios.post(
+      const currentToken = getAccessToken();
+      await axios.post(
         `${API_ENDPOINTS.EXAMS}/import`,
         formData,
         {
           headers: {
             'Content-Type': 'multipart/form-data',
-            Authorization: `Bearer ${token}`,
+            Authorization: `Bearer ${currentToken}`,
           },
         }
       );
