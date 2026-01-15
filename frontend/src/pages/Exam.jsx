@@ -45,7 +45,7 @@ export default function Exam() {
 
   const fetchExam = useCallback(async () => {
     try {
-      const response = await axios.get(API_ENDPOINTS.EXAM_BY_ID(examId), authConfig);
+      const response = await axios.get(API_ENDPOINTS.EXAM_BY_ID(examId) + '/start', authConfig);
       setExam(response.data);
       const duration = response.data.duration * 60; // Convert minutes to seconds
 
@@ -97,7 +97,11 @@ export default function Exam() {
         setTimeRemaining(duration);
       }
     } catch (err) {
-      setError("Failed to load exam. Please try again.");
+      if (err.response?.status === 403) {
+        setError(err.response.data.error || "This exam is not available or you have already attempted it.");
+      } else {
+        setError("Failed to load exam. Please try again.");
+      }
       console.error(err);
     } finally {
       setLoading(false);
@@ -192,7 +196,9 @@ export default function Exam() {
           score: response.data.score,
           passed: response.data.passed,
           exam: exam.title,
-          violations: violations.length
+          violations: violations.length,
+          totalQuestions: response.data.totalQuestions || exam.questions.length,
+          correctAnswers: response.data.correctAnswers || 0
         },
       });
     } catch (err) {
@@ -241,6 +247,25 @@ export default function Exam() {
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, [exam, currentQuestion, examSubmitted, setCurrentQuestion]);
+
+  // Auto-save answers every 10 seconds
+  useEffect(() => {
+    if (!exam || !examStarted || examSubmitted) return;
+
+    const autoSaveInterval = setInterval(() => {
+      try {
+        localStorage.setItem(`exam_${examId}_answers`, JSON.stringify(answers));
+        localStorage.setItem(`exam_${examId}_timestamp`, Date.now().toString());
+        localStorage.setItem(`exam_${examId}_timeRemaining`, timeRemaining.toString());
+        localStorage.setItem(`exam_${examId}_currentQuestion`, currentQuestion.toString());
+        console.log('Auto-saved answers at', new Date().toLocaleTimeString());
+      } catch (error) {
+        console.error('Auto-save failed:', error);
+      }
+    }, 10000); // Every 10 seconds
+
+    return () => clearInterval(autoSaveInterval);
+  }, [exam, examId, answers, timeRemaining, currentQuestion, examStarted, examSubmitted]);
 
   // Proctoring: Detect tab switch, fullscreen exit, etc.
   useEffect(() => {
@@ -416,6 +441,7 @@ export default function Exam() {
           currentQuestion={currentQuestion}
           answers={answers}
           onQuestionClick={handleQuestionClick}
+          questions={exam.questions}
         />
 
         {/* Violations Alert */}

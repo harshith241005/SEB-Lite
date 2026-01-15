@@ -209,9 +209,9 @@ export default function InstructorDashboard() {
                             const toggleActive = async () => {
                               try {
                                 const token = localStorage.getItem("token");
-                                await axios.put(
-                                  `${API_ENDPOINTS.EXAMS}/${exam._id || exam.id}`,
-                                  { isActive: !exam.isActive },
+                                await axios.patch(
+                                  `${API_ENDPOINTS.EXAMS}/${exam._id || exam.id}/toggle`,
+                                  {},
                                   {
                                     headers: {
                                       Authorization: `Bearer ${token}`,
@@ -221,6 +221,7 @@ export default function InstructorDashboard() {
                                 fetchDashboardData();
                               } catch (err) {
                                 console.error('Failed to toggle exam status:', err);
+                                alert(`Failed to toggle exam: ${err.response?.data?.error || err.message}`);
                               }
                             };
                             toggleActive();
@@ -298,16 +299,84 @@ export default function InstructorDashboard() {
 
         {activeTab === 'create' && (
           <div className="bg-white rounded-lg shadow p-6">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">Create New Exam</h3>
-            <p className="text-gray-600 mb-6">
-              Use the exam creation interface to build comprehensive assessments with security monitoring.
-            </p>
-            <button
-              onClick={() => navigate('/create-exam')}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition"
-            >
-              Start Creating Exam
-            </button>
+            <h3 className="text-lg font-medium text-gray-900 mb-4">Create or Upload Exam</h3>
+            
+            {/* Upload JSON Section */}
+            <div className="mb-8">
+              <h4 className="font-semibold text-gray-800 mb-2">📤 Upload Exam JSON</h4>
+              <p className="text-gray-600 mb-4 text-sm">
+                Upload a pre-formatted exam JSON file with questions, options, and correct answers.
+              </p>
+              <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 hover:border-blue-400 transition">
+                <input
+                  type="file"
+                  id="examFileInput"
+                  accept=".json"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files[0];
+                    if (!file) return;
+                    
+                    try {
+                      const formData = new FormData();
+                      formData.append('examFile', file);
+                      
+                      const response = await axios.post(
+                        `${API_ENDPOINTS.EXAMS}/admin/upload`,
+                        formData,
+                        {
+                          headers: {
+                            Authorization: `Bearer ${token}`,
+                            'Content-Type': 'multipart/form-data',
+                          },
+                        }
+                      );
+                      
+                      alert(`✅ Exam "${response.data.exam.title}" uploaded successfully!`);
+                      fetchDashboardData();
+                      e.target.value = ''; // Reset input
+                    } catch (err) {
+                      alert(`❌ Upload failed: ${err.response?.data?.error || err.message}`);
+                    }
+                  }}
+                />
+                <label
+                  htmlFor="examFileInput"
+                  className="cursor-pointer flex flex-col items-center"
+                >
+                  <div className="text-5xl mb-2">📄</div>
+                  <p className="text-blue-600 font-medium">Click to select JSON file</p>
+                  <p className="text-gray-500 text-sm mt-1">or drag and drop</p>
+                </label>
+              </div>
+              <p className="text-xs text-gray-500 mt-2">
+                Expected format: JSON with title, duration, questions array
+              </p>
+            </div>
+
+            {/* Divider */}
+            <div className="relative mb-8">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-gray-300"></div>
+              </div>
+              <div className="relative flex justify-center text-sm">
+                <span className="px-2 bg-white text-gray-500">OR</span>
+              </div>
+            </div>
+
+            {/* Create Exam Section */}
+            <div>
+              <h4 className="font-semibold text-gray-800 mb-2">✏️ Create Exam Manually</h4>
+              <p className="text-gray-600 mb-4 text-sm">
+                Use the interactive exam builder to create questions one by one.
+              </p>
+              <button
+                onClick={() => navigate('/create-exam')}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition w-full"
+              >
+                Start Creating Exam
+              </button>
+            </div>
           </div>
         )}
       </div>

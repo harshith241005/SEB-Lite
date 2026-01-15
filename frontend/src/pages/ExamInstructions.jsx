@@ -31,10 +31,14 @@ export default function ExamInstructions() {
 
     const fetchExam = async () => {
       try {
-        const response = await axios.get(API_ENDPOINTS.EXAM_BY_ID(examId), authConfig);
+        const response = await axios.get(API_ENDPOINTS.EXAM_BY_ID(examId) + '/start', authConfig);
         setExam(response.data);
       } catch (err) {
-        setError("Failed to load exam. Please try again.");
+        if (err.response?.status === 403) {
+          setError(err.response.data.error || "You have already attempted this exam or it is not available.");
+        } else {
+          setError("Failed to load exam. Please try again.");
+        }
         console.error(err);
       } finally {
         setLoading(false);
@@ -115,7 +119,7 @@ export default function ExamInstructions() {
                 </div>
                 <div>
                   <span className="font-medium text-gray-700">Passing Percentage:</span>
-                  <span className="ml-2 text-gray-900">{exam.passingPercentage}%</span>
+                  <span className="ml-2 text-gray-900">{exam.passingPercentage || 60}%</span>
                 </div>
                 <div>
                   <span className="font-medium text-gray-700">Max Violations:</span>
