@@ -119,8 +119,19 @@ router.get("/:id/start", authMiddleware, async (req, res) => {
       return res.status(403).json({ error: "You have already attempted this exam" });
     }
 
-    // Return exam data for starting
-    res.json(exam);
+    // Remove correct answers from questions before sending to frontend
+    const examObj = exam.toObject();
+    examObj.questions = examObj.questions.map((q, index) => ({
+      questionId: index,
+      question: q.question,
+      options: q.options,
+      category: q.category,
+      difficulty: q.difficulty,
+      questionType: 'mcq'
+    }));
+
+    // Return exam data for starting (without correct answers)
+    res.json(examObj);
   } catch (error) {
     console.error("Start exam error:", error);
     res.status(500).json({ error: "Failed to start exam. Please try again." });
@@ -264,6 +275,40 @@ router.post("/", authMiddleware, async (req, res) => {
 });
 
 // Update exam (instructor only) - for activation/deactivation
+router.patch("/:id/toggle", authMiddleware, async (req, res) => {
+  try {
+    if (req.role !== "instructor" && req.role !== "admin") {
+      return res.status(403).json({ error: "Only instructors or admins can update exams" });
+    }
+
+    const exam = await Exam.findById(req.params.id);
+    if (!exam) {
+      return res.status(404).json({ error: "Exam not found" });
+    }
+
+    // Check if instructor owns this exam or is admin
+    if (exam.instructor.toString() !== req.userId && req.role !== "admin") {
+      return res.status(403).json({ error: "Not authorized to update this exam" });
+    }
+
+    // Toggle isActive status
+    exam.isActive = !exam.isActive;
+    await exam.save();
+
+    res.json({
+      message: `Exam ${exam.isActive ? 'activated' : 'deactivated'} successfully`,
+      exam: {
+        id: exam._id,
+        title: exam.title,
+        isActive: exam.isActive
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update exam (instructor only) - for activation/deactivation
 router.put("/:id", authMiddleware, async (req, res) => {
   try {
     if (req.role !== "instructor" && req.role !== "admin") {
@@ -298,6 +343,68 @@ router.put("/:id", authMiddleware, async (req, res) => {
   }
 });
 
+// Admin upload exam endpoint (supports both JSON file and JSON body)
+router.post("/admin/upload", authMiddleware, upload.single('examFile'), async (req, res) => {
+  try {
+    if (req.role !== "instructor" && req.role !== "admin") {
+      return res.status(403).json({ error: "Only instructors or admins can upload exams" });
+    }
+
+    let examData;
+
+    // Check if file was uploaded
+    if (req.file) {
+      try {
+        examData = JSON.parse(req.file.buffer.toString('utf8'));
+      } catch (parseError) {
+        return res.status(400).json({ error: "Invalid JSON file format" });
+      }
+    } else if (req.body) {
+      // If no file, check if JSON data was sent in the body
+      examData = req.body;
+    } else {
+      return res.status(400).json({ error: "No exam data provided" });
+    }
+
+    // Validate exam data structure
+    if (!examData.title || !examData.duration || !examData.questions || !Array.isArray(examData.questions)) {
+      return res.status(400).json({ 
+        error: "Invalid exam format. Required: title, duration, questions array" 
+      });
+    }
+
+    // Create the exam
+    const exam = new Exam({
+      title: examData.title,
+      company: examData.company || 'Unknown',
+      type: examData.type || 'PLACEMENT_QUIZ',
+      duration: parseInt(examData.duration),
+      maxViolations: examData.maxViolations || 5,
+      isActive: examData.isActive !== undefined ? examData.isActive : true,
+      questions: examData.questions,
+      instructor: req.userId
+    });
+
+    await exam.save();
+
+    res.status(201).json({
+      message: "Exam uploaded successfully",
+      exam: {
+        id: exam._id,
+        title: exam.title,
+        company: exam.company,
+        type: exam.type,
+        duration: exam.duration,
+        questionCount: exam.questions.length,
+        isActive: exam.isActive
+      }
+    });
+  } catch (error) {
+    console.error("Upload exam error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Submit exam answers
 router.post("/:examId/submit", authMiddleware, async (req, res) => {
   try {
@@ -319,8 +426,14 @@ router.post("/:examId/submit", authMiddleware, async (req, res) => {
     const evaluatedAnswers = answers.map((ans) => {
       const questionIndex = parseInt(ans.questionId);
       const question = exam.questions[questionIndex];
-      const isCorrect = question && question.correct === parseInt(ans.answer);
-      if (isCorrect) correctAnswers++;
+      
+      if (question) {
+        // Compare the answer (option text) with the correct option
+        const correctOption = question.options[question.correct];
+        const isCorrect = ans.answer === correctOption;
+        if (isCorrect) correctAnswers++;
+      }
+      
       return ans;
     });
 

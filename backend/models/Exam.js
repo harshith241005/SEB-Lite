@@ -29,7 +29,7 @@ const questionSchema = new mongoose.Schema({
   category: {
     type: String,
     required: true,
-    enum: ['Java', 'DSA', 'DBMS', 'OS', 'SQL']
+    enum: ['Java', 'DSA', 'DBMS', 'OS', 'SQL', 'Computer Networks', 'Python', 'JavaScript', 'C++', 'C', 'General']
   },
   difficulty: {
     type: String,
