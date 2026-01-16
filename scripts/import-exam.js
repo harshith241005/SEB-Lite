@@ -1,7 +1,10 @@
 // Import exam data into MongoDB
-const mongoose = require(__dirname + '/backend/node_modules/mongoose');
-const fs = require('fs');
+// NOTE: Run from repository root: node scripts/import-exam.js
 const path = require('path');
+const fs = require('fs');
+
+// Resolve mongoose from backend node_modules
+const mongoose = require(path.resolve(__dirname, '../backend/node_modules/mongoose'));
 
 // Exam model (simplified)
 const examSchema = new mongoose.Schema({
@@ -30,8 +33,8 @@ async function importExamData() {
 
     console.log('✅ Connected to MongoDB');
 
-    // Read exam data
-    const examDataPath = path.join(__dirname, 'exam-data.json');
+    // Read exam data from examples folder
+    const examDataPath = path.resolve(__dirname, '../examples/exam-data.json');
     const examData = JSON.parse(fs.readFileSync(examDataPath, 'utf8'));
 
     // Check if exam already exists
