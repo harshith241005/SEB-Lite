@@ -49,14 +49,11 @@ router.post("/register", registerLimiter, async (req, res) => {
       return res.status(400).json({ error: "Email already registered" });
     }
 
-    // Hash password (bcrypt handles salt internally)
-    const saltRounds = 12; // Increased from 10 for better security
-    const hashedPassword = await bcrypt.hash(password, saltRounds);
-
+    // Don't hash password here - the User model's pre-save hook will hash it
     const user = await db.createUser({
       name,
       email: email.toLowerCase(), // Normalize email
-      password: hashedPassword,
+      password: password, // Plain password - will be hashed by User model
       role: role || "student",
     });
 

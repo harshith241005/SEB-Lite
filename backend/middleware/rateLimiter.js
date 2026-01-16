@@ -1,21 +1,24 @@
 const rateLimit = require("express-rate-limit");
 
+// Check if we're in development mode
+const isDev = process.env.NODE_ENV !== 'production';
+
 // Rate limiter for login attempts
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // Limit each IP to 5 login requests per windowMs
+  max: isDev ? 50 : 5, // More lenient in development
   message: {
     error: "Too many login attempts from this IP, please try again after 15 minutes.",
   },
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
-  skipSuccessfulRequests: false, // Count successful requests too
+  skipSuccessfulRequests: true, // Don't count successful requests
 });
 
 // Rate limiter for registration
 const registerLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
-  max: 3, // Limit each IP to 3 registration requests per hour
+  max: isDev ? 20 : 3, // More lenient in development
   message: {
     error: "Too many registration attempts from this IP, please try again after 1 hour.",
   },

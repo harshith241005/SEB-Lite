@@ -46,56 +46,48 @@ export default function Exam() {
 
   const fetchExam = useCallback(async () => {
     try {
-      const response = await axios.get(API_ENDPOINTS.EXAM_BY_ID(examId), authConfig);
-      setExam(response.data);
-      const duration = response.data.duration * 60; // Convert minutes to seconds
+      // Use EXAM_START endpoint to get questions
+      const response = await axios.get(API_ENDPOINTS.EXAM_START(examId), authConfig);
+      
+      // The response contains { exam: {...}, questions: [...], progress: {...} }
+      const examData = {
+        ...response.data.exam,
+        questions: response.data.questions || []
+      };
+      
+      setExam(examData);
+      const duration = examData.duration * 60; // Convert minutes to seconds
 
-      // Load saved state if available
-      const savedAnswers = localStorage.getItem(`exam_${examId}_answers`);
-      const savedTimestamp = localStorage.getItem(`exam_${examId}_timestamp`);
-      const savedTime = localStorage.getItem(`exam_${examId}_timeRemaining`);
-      const savedQuestion = localStorage.getItem(`exam_${examId}_currentQuestion`);
-
-      if (savedAnswers && savedTimestamp) {
-        const timeSinceSave = Date.now() - parseInt(savedTimestamp);
-        // Only restore if saved within last 24 hours
-        if (timeSinceSave < 24 * 60 * 60 * 1000) {
-          // Restore answers
-          const parsedAnswers = JSON.parse(savedAnswers);
-          Object.keys(parsedAnswers).forEach(key => {
-            updateAnswer(key, parsedAnswers[key]);
+      // Restore progress from server if available
+      if (response.data.progress) {
+        const { answers: savedAnswers, timeRemaining: serverTime } = response.data.progress;
+        
+        // Restore answers from server
+        if (savedAnswers && savedAnswers.length > 0) {
+          savedAnswers.forEach(answer => {
+            updateAnswer(answer.questionIndex, answer.selectedOption);
           });
-
-          // Restore time and question if valid
-          if (savedTime) {
-            const remaining = parseInt(savedTime);
-            if (remaining > 0 && remaining <= duration) {
-              setTimeRemaining(remaining);
-            } else {
-              setTimeRemaining(duration);
-            }
-          } else {
-            setTimeRemaining(duration);
-          }
-
-          if (savedQuestion) {
-            const questionIndex = parseInt(savedQuestion);
-            if (questionIndex >= 0 && questionIndex < response.data.questions.length) {
-              setCurrentQuestion(questionIndex);
-            }
-          }
-
-          setExamStarted(true);
+        }
+        
+        // Use server time remaining if available
+        if (serverTime && serverTime > 0) {
+          setTimeRemaining(serverTime);
         } else {
-          // Clear old data
-          localStorage.removeItem(`exam_${examId}_answers`);
-          localStorage.removeItem(`exam_${examId}_timestamp`);
-          localStorage.removeItem(`exam_${examId}_timeRemaining`);
-          localStorage.removeItem(`exam_${examId}_currentQuestion`);
           setTimeRemaining(duration);
         }
+        
+        setExamStarted(true);
       } else {
         setTimeRemaining(duration);
+      }
+
+      // Also check localStorage for any unsaved local progress
+      const savedQuestion = localStorage.getItem(`exam_${examId}_currentQuestion`);
+      if (savedQuestion) {
+        const questionIndex = parseInt(savedQuestion);
+        if (questionIndex >= 0 && questionIndex < examData.questions.length) {
+          setCurrentQuestion(questionIndex);
+        }
       }
     } catch (err) {
       setError("Failed to load exam. Please try again.");
@@ -135,8 +127,8 @@ export default function Exam() {
     }
   }, [exam, authConfig, addViolation]);
 
-  const handleAnswerChange = (questionId, answer) => {
-    updateAnswer(questionId, answer);
+  const handleAnswerChange = (questionIndex, answer) => {
+    updateAnswer(questionIndex, answer);
   };
 
   const handleQuestionClick = (index) => {
@@ -145,9 +137,10 @@ export default function Exam() {
 
   const handleSubmit = useCallback(async () => {
     try {
-      const submissionAnswers = exam.questions.map((q) => ({
-        questionId: q.questionId,
-        answer: answers[q.questionId] || "",
+      // Build answers array with questionIndex and selectedOption
+      const submissionAnswers = exam.questions.map((q, index) => ({
+        questionIndex: q.questionIndex !== undefined ? q.questionIndex : index,
+        selectedOption: answers[q.questionIndex !== undefined ? q.questionIndex : index],
       }));
 
       // Encrypt answers before submission if Electron is available
@@ -165,7 +158,7 @@ export default function Exam() {
       }
 
       const response = await axios.post(
-        API_ENDPOINTS.SUBMIT_EXAM(exam._id),
+        API_ENDPOINTS.SUBMIT_EXAM(exam.id || exam._id),
         {
           answers: submissionAnswers,
           encryptedId,
@@ -384,8 +377,34 @@ export default function Exam() {
     );
   }
 
+  // Check if questions exist
+  if (!exam.questions || exam.questions.length === 0) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-100">
+        <div className="text-center">
+          <div className="text-xl font-semibold text-gray-700 mb-4">No questions available for this exam</div>
+          <button
+            onClick={() => navigate("/student-dashboard")}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-lg transition"
+          >
+            Back to Dashboard
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const question = exam.questions[currentQuestion];
   const progress = ((currentQuestion + 1) / exam.questions.length) * 100;
+
+  // Safety check for current question
+  if (!question) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-100">
+        <div className="text-xl font-semibold text-gray-700">Loading question...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-4">
@@ -417,6 +436,7 @@ export default function Exam() {
           currentQuestion={currentQuestion}
           answers={answers}
           onQuestionClick={handleQuestionClick}
+          questions={exam.questions}
         />
 
         {/* Warning Toast */}
@@ -452,23 +472,27 @@ export default function Exam() {
             <h2 className="text-xl font-semibold text-gray-800">
               {question.prompt || question.question}
             </h2>
-            <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-              question.category === 'Java' ? 'bg-orange-100 text-orange-800' :
-              question.category === 'DSA' ? 'bg-blue-100 text-blue-800' :
-              question.category === 'DBMS' ? 'bg-green-100 text-green-800' :
-              question.category === 'SQL' ? 'bg-purple-100 text-purple-800' :
-              question.category === 'OS' ? 'bg-red-100 text-red-800' :
-              question.category === 'Computer Networks' ? 'bg-yellow-100 text-yellow-800' :
-              'bg-gray-100 text-gray-800'
-            }`}>
-              {question.category} | {question.difficulty}
-            </span>
+            {question.category && (
+              <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                question.category === 'Java' ? 'bg-orange-100 text-orange-800' :
+                question.category === 'DSA' ? 'bg-blue-100 text-blue-800' :
+                question.category === 'DBMS' ? 'bg-green-100 text-green-800' :
+                question.category === 'SQL' ? 'bg-purple-100 text-purple-800' :
+                question.category === 'OS' ? 'bg-red-100 text-red-800' :
+                question.category === 'Computer Networks' ? 'bg-yellow-100 text-yellow-800' :
+                'bg-gray-100 text-gray-800'
+              }`}>
+                {question.category}{question.difficulty ? ` | ${question.difficulty}` : ''}
+              </span>
+            )}
           </div>
 
-          {question.questionType === "mcq" && (
+          {/* MCQ Options - all questions are MCQ type */}
+          {question.options && question.options.length > 0 && (
             <div className="space-y-3">
               {question.options.map((option, index) => {
-                const isSelected = answers[question.questionId] === option;
+                const questionKey = question.questionIndex !== undefined ? question.questionIndex : currentQuestion;
+                const isSelected = answers[questionKey] === index;
                 return (
                   <label
                     key={index}
@@ -482,12 +506,10 @@ export default function Exam() {
                   >
                     <input
                       type="radio"
-                      name={`question-${question.questionId}`}
-                      value={option}
+                      name={`question-${questionKey}`}
+                      value={index}
                       checked={isSelected}
-                      onChange={(e) =>
-                        handleAnswerChange(question.questionId, e.target.value)
-                      }
+                      onChange={() => handleAnswerChange(questionKey, index)}
                       className="mr-4 w-5 h-5 text-indigo-600 focus:ring-2 focus:ring-indigo-500"
                     />
                     <span className={`text-gray-700 font-medium ${isSelected ? 'text-indigo-900' : ''}`}>
@@ -497,19 +519,6 @@ export default function Exam() {
                 );
               })}
             </div>
-          )}
-
-          {(question.questionType === "short_answer" ||
-            question.questionType === "essay") && (
-            <textarea
-              value={answers[question.questionId] || ""}
-              onChange={(e) =>
-                handleAnswerChange(question.questionId, e.target.value)
-              }
-              className="w-full p-4 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 resize-none"
-              placeholder="Enter your answer here..."
-              rows={question.questionType === "essay" ? 8 : 4}
-            />
           )}
         </div>
 

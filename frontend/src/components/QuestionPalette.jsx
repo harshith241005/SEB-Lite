@@ -5,11 +5,13 @@ export default function QuestionPalette({
   currentQuestion,
   answers,
   onQuestionClick,
-  questions
+  questions = []
 }) {
   const getQuestionStatus = (index) => {
-    const questionId = questions[index].questionId;
-    const hasAnswer = answers[questionId];
+    // Use questionIndex from the question if available, otherwise use the index
+    const question = questions[index];
+    const questionKey = question?.questionIndex !== undefined ? question.questionIndex : index;
+    const hasAnswer = answers[questionKey] !== undefined && answers[questionKey] !== null;
 
     if (index === currentQuestion) {
       return 'current';
@@ -72,7 +74,7 @@ export default function QuestionPalette({
           </div>
         </div>
         <div className="text-gray-600 font-medium">
-          Answered: {Object.keys(answers).filter(key => answers[key]).length} / {totalQuestions}
+          Answered: {Object.keys(answers).filter(key => answers[key] !== undefined && answers[key] !== null).length} / {totalQuestions}
         </div>
       </div>
     </div>
