@@ -5,12 +5,13 @@
   "main": "electron/main.js",
   "scripts": {
     "start": "npm run install-all && concurrently \"npm run backend\" \"npm run frontend\" \"npm run electron\"",
-    "start-dev": "npm run install-all && concurrently \"npm run backend\" \"npm run frontend\" \"wait-on http://localhost:3000 && npm run electron-dev\"",
+    "start-dev": "npm run install-all && concurrently \"npm run backend\" \"npm run frontend\" \"npm run wait-and-electron\"",
+    "wait-and-electron": "wait-on http://localhost:3000 && npm run electron-dev",
     "install-all": "npm install && npm --prefix backend install && npm --prefix frontend install",
     "backend": "npm --prefix backend start",
     "frontend": "npm --prefix frontend start",
     "electron": "electron .",
-    "electron-dev": "NODE_ENV=development electron . --dev",
+    "electron-dev": "cross-env NODE_ENV=development electron . --dev",
     "test": "npm --prefix backend run test",
     "test-api": "node scripts/api-test.js",
     "test-full": "node scripts/full-test.js",
@@ -21,6 +22,7 @@
   },
   "devDependencies": {
     "concurrently": "^8.2.0",
+    "cross-env": "^7.0.3",
     "electron": "^25.0.0",
     "electron-is-dev": "^2.0.0",
     "wait-on": "^7.0.1"

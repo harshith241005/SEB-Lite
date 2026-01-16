@@ -1,7 +1,10 @@
 // Simple exam import script
-const { MongoClient } = require(__dirname + '/../backend/node_modules/mongodb');
-const fs = require('fs');
+// NOTE: Run from repository root: node scripts/simple-import.js
 const path = require('path');
+const fs = require('fs');
+
+// Resolve mongodb from backend node_modules
+const { MongoClient } = require(path.resolve(__dirname, '../backend/node_modules/mongodb'));
 
 async function importExam() {
   const client = new MongoClient('mongodb://127.0.0.1:27017');
@@ -14,7 +17,7 @@ async function importExam() {
     const exams = db.collection('exams');
 
     // Read exam data from examples folder
-    const examData = JSON.parse(fs.readFileSync(path.join(__dirname, '../examples/exam-data.json'), 'utf8'));
+    const examData = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../examples/exam-data.json'), 'utf8'));
 
     // Add metadata
     examData.isActive = true;
