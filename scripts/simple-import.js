@@ -1,5 +1,5 @@
 // Simple exam import script
-const { MongoClient } = require(__dirname + '/backend/node_modules/mongodb');
+const { MongoClient } = require(__dirname + '/../backend/node_modules/mongodb');
 const fs = require('fs');
 const path = require('path');
 
@@ -13,8 +13,8 @@ async function importExam() {
     const db = client.db('seb-lite');
     const exams = db.collection('exams');
 
-    // Read exam data
-    const examData = JSON.parse(fs.readFileSync(path.join(__dirname, 'exam-data.json'), 'utf8'));
+    // Read exam data from examples folder
+    const examData = JSON.parse(fs.readFileSync(path.join(__dirname, '../examples/exam-data.json'), 'utf8'));
 
     // Add metadata
     examData.isActive = true;

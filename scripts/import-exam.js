@@ -1,5 +1,5 @@
 // Import exam data into MongoDB
-const mongoose = require(__dirname + '/backend/node_modules/mongoose');
+const mongoose = require(__dirname + '/../backend/node_modules/mongoose');
 const fs = require('fs');
 const path = require('path');
 
@@ -30,8 +30,8 @@ async function importExamData() {
 
     console.log('✅ Connected to MongoDB');
 
-    // Read exam data
-    const examDataPath = path.join(__dirname, 'exam-data.json');
+    // Read exam data from examples folder
+    const examDataPath = path.join(__dirname, '../examples/exam-data.json');
     const examData = JSON.parse(fs.readFileSync(examDataPath, 'utf8'));
 
     // Check if exam already exists

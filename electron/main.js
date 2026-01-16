@@ -12,6 +12,9 @@ let maxViolations = 5; // Auto-submit after 5 violations
 let examData = null;
 let encryptedAnswers = null;
 
+// Development mode flag - allows easier testing
+const isDev = process.env.NODE_ENV === 'development' || process.argv.includes('--dev') || !app.isPackaged;
+
 // Security monitoring
 let lastMousePosition = { x: 0, y: 0 };
 let mouseMoveCount = 0;
@@ -30,22 +33,22 @@ function createWindow() {
     logViolation('multiple_monitors', `Multiple monitors detected: ${displays.length} displays`, 'high');
   }
 
-  // Create the browser window with maximum security
+  // Create the browser window - less restrictive in dev mode for easier testing
   mainWindow = new BrowserWindow({
     width: width,
     height: height,
     x: 0,
     y: 0,
-    fullscreen: true,
-    frame: false, // Remove window frame for kiosk mode
-    alwaysOnTop: true,
-    resizable: false,
-    movable: false,
-    minimizable: false,
-    maximizable: false,
-    closable: false,
-    skipTaskbar: true,
-    kiosk: true, // Enable kiosk mode
+    fullscreen: !isDev, // Disable fullscreen in dev mode
+    frame: isDev, // Show frame in dev mode for easier window management
+    alwaysOnTop: !isDev, // Disable always on top in dev mode
+    resizable: isDev, // Allow resize in dev mode
+    movable: isDev, // Allow move in dev mode
+    minimizable: isDev, // Allow minimize in dev mode
+    maximizable: isDev, // Allow maximize in dev mode
+    closable: isDev, // Allow close in dev mode
+    skipTaskbar: !isDev, // Show in taskbar in dev mode
+    kiosk: !isDev, // Disable kiosk mode in dev mode
     show: false, // Don't show until ready-to-show
     webPreferences: {
       nodeIntegration: false,
@@ -63,15 +66,18 @@ function createWindow() {
   // Show window only when ready
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
-    // Force fullscreen after showing
-    mainWindow.setFullScreen(true);
+    // Force fullscreen after showing (only in production)
+    if (!isDev) {
+      mainWindow.setFullScreen(true);
+    }
   });
 
   // Load the app
-  const isDev = process.env.NODE_ENV === 'development';
+  // In development, connect to React dev server
+  // In production, load the built React app
   const startUrl = isDev
-    ? `file://${path.join(__dirname, 'src/renderer/index.html')}` // Local HTML file
-    : `file://${path.join(__dirname, 'src/renderer/index.html')}`; // Production - also local HTML
+    ? 'http://localhost:3000' // React dev server
+    : `file://${path.join(__dirname, '../frontend/build/index.html')}`; // Production - built React app
 
   mainWindow.loadURL(startUrl);
 
@@ -107,10 +113,12 @@ function createWindow() {
     }
   });
 
-  // Monitor for fullscreen exit attempts
+  // Monitor for fullscreen exit attempts (only in production)
   mainWindow.on('leave-full-screen', () => {
-    logViolation('fullscreen_exit', 'User attempted to exit fullscreen', 'high');
-    mainWindow.setFullScreen(true);
+    if (!isDev) {
+      logViolation('fullscreen_exit', 'User attempted to exit fullscreen', 'high');
+      mainWindow.setFullScreen(true);
+    }
   });
 
   // Monitor window focus/blur
