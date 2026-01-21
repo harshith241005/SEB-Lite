@@ -109,19 +109,19 @@ export default function ExamInstructions() {
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
                   <span className="font-medium text-gray-700">Duration:</span>
-                  <span className="ml-2 text-gray-900">{exam.duration} minutes</span>
+                  <span className="ml-2 text-gray-900">{exam.duration || 60} minutes</span>
                 </div>
                 <div>
                   <span className="font-medium text-gray-700">Total Questions:</span>
-                  <span className="ml-2 text-gray-900">{exam.questions?.length || exam.totalQuestions}</span>
+                  <span className="ml-2 text-gray-900">{exam.questionCount || exam.totalQuestions || 'N/A'}</span>
                 </div>
                 <div>
                   <span className="font-medium text-gray-700">Passing Percentage:</span>
-                  <span className="ml-2 text-gray-900">{exam.passingPercentage}%</span>
+                  <span className="ml-2 text-gray-900">{exam.passingPercentage || 60}%</span>
                 </div>
                 <div>
                   <span className="font-medium text-gray-700">Max Violations:</span>
-                  <span className="ml-2 text-gray-900">{exam.maxViolations}</span>
+                  <span className="ml-2 text-gray-900">{exam.maxViolations || 3}</span>
                 </div>
               </div>
             </div>

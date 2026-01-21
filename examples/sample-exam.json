@@ -1,0 +1,97 @@
+{
+  "title": "Software Developer Assessment",
+  "company": "Tech Solutions Inc",
+  "type": "PLACEMENT_QUIZ",
+  "description": "Comprehensive technical assessment for software developer position",
+  "duration": 45,
+  "maxViolations": 3,
+  "passingPercentage": 60,
+  "instructions": [
+    "Read each question carefully before answering",
+    "Do not switch tabs or windows during the exam",
+    "Your session will be terminated after 3 violations",
+    "Submit before the timer runs out"
+  ],
+  "questions": [
+    {
+      "question": "What is the time complexity of binary search?",
+      "options": ["O(n)", "O(log n)", "O(n²)", "O(1)"],
+      "correct": 1,
+      "category": "DSA",
+      "difficulty": "Easy"
+    },
+    {
+      "question": "Which data structure uses LIFO (Last In First Out) principle?",
+      "options": ["Queue", "Stack", "Array", "Linked List"],
+      "correct": 1,
+      "category": "DSA",
+      "difficulty": "Easy"
+    },
+    {
+      "question": "What does SQL stand for?",
+      "options": ["Structured Query Language", "Simple Query Language", "Standard Query Logic", "System Query Language"],
+      "correct": 0,
+      "category": "SQL",
+      "difficulty": "Easy"
+    },
+    {
+      "question": "Which HTTP method is used to update a resource?",
+      "options": ["GET", "POST", "PUT", "DELETE"],
+      "correct": 2,
+      "category": "Web Development",
+      "difficulty": "Medium"
+    },
+    {
+      "question": "What is the purpose of the 'final' keyword in Java?",
+      "options": ["To define a constant", "To enable inheritance", "To create threads", "To handle exceptions"],
+      "correct": 0,
+      "category": "Java",
+      "difficulty": "Medium"
+    },
+    {
+      "question": "Which of the following is NOT a JavaScript data type?",
+      "options": ["String", "Boolean", "Float", "Symbol"],
+      "correct": 2,
+      "category": "JavaScript",
+      "difficulty": "Medium"
+    },
+    {
+      "question": "What is a foreign key in a database?",
+      "options": [
+        "A key that encrypts data",
+        "A field that links to primary key in another table",
+        "A unique identifier for each row",
+        "A key used for indexing"
+      ],
+      "correct": 1,
+      "category": "DBMS",
+      "difficulty": "Medium"
+    },
+    {
+      "question": "Which sorting algorithm has the best average case time complexity?",
+      "options": ["Bubble Sort", "Merge Sort", "Selection Sort", "Insertion Sort"],
+      "correct": 1,
+      "category": "DSA",
+      "difficulty": "Hard"
+    },
+    {
+      "question": "What does REST stand for?",
+      "options": [
+        "Representational State Transfer",
+        "Remote Execution State Transfer",
+        "Reliable State Transmission",
+        "Resource State Transaction"
+      ],
+      "correct": 0,
+      "category": "Web Development",
+      "difficulty": "Medium"
+    },
+    {
+      "question": "Which design pattern ensures a class has only one instance?",
+      "options": ["Factory Pattern", "Observer Pattern", "Singleton Pattern", "Strategy Pattern"],
+      "correct": 2,
+      "category": "Design Patterns",
+      "difficulty": "Hard"
+    }
+  ]
+}

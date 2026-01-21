@@ -99,15 +99,18 @@ export default function Exam() {
 
   const logViolation = useCallback(async (type, description, severity) => {
     try {
+      if (!exam) return;
+      
       // Log to backend
-      await axios.post(
+      const response = await axios.post(
         API_ENDPOINTS.VIOLATIONS,
         {
-          examId: exam._id,
+          examId: exam._id || exam.id,
           violationType: type,
           severity,
           description,
           timestamp: new Date(),
+          timeRemaining,
         },
         authConfig
       );
@@ -122,10 +125,38 @@ export default function Exam() {
       }
 
       addViolation({ type, severity, timestamp: new Date() });
+
+      // Check if auto-submitted by backend due to violation limit
+      if (response.data.autoSubmitted) {
+        setExamSubmitted(true);
+        navigate("/submitted", {
+          state: {
+            score: response.data.submission?.score || 0,
+            passed: response.data.submission?.passed || false,
+            exam: exam.title,
+            violations: response.data.violationCount,
+            correctAnswers: response.data.submission?.correctAnswers || 0,
+            totalQuestions: response.data.submission?.totalQuestions || 0,
+            autoSubmitted: true,
+            reason: "Maximum violation limit exceeded"
+          },
+        });
+        return;
+      }
+
+      // Client-side fallback check for violation limit
+      const maxViolations = exam.maxViolations || 3;
+      const currentViolationCount = violations.length + 1; // +1 because we just added one
+      if (currentViolationCount >= maxViolations) {
+        console.warn('Violation limit reached - exam will be auto-submitted');
+        // Set a flag to trigger auto-submit
+        setWarningMessage('Maximum violations exceeded! Exam will be auto-submitted.');
+        setShowWarning(true);
+      }
     } catch (err) {
       console.error("Failed to log violation:", err);
     }
-  }, [exam, authConfig, addViolation]);
+  }, [exam, authConfig, addViolation, timeRemaining, navigate, setExamSubmitted, violations]);
 
   const handleAnswerChange = (questionIndex, answer) => {
     updateAnswer(questionIndex, answer);
@@ -186,7 +217,9 @@ export default function Exam() {
           score: response.data.score,
           passed: response.data.passed,
           exam: exam.title,
-          violations: violations.length
+          violations: violations.length,
+          correctAnswers: response.data.correctAnswers,
+          totalQuestions: response.data.totalQuestions
         },
       });
     } catch (err) {
@@ -194,6 +227,17 @@ export default function Exam() {
       console.error(err);
     }
   }, [exam, answers, authConfig, setExamSubmitted, navigate, violations]);
+
+  // Auto-submit when violations exceed limit
+  useEffect(() => {
+    if (!exam || examSubmitted) return;
+    
+    const maxViolations = exam.maxViolations || 3;
+    if (violations.length >= maxViolations) {
+      console.warn('Auto-submitting due to violation limit');
+      handleSubmit();
+    }
+  }, [violations.length, exam, examSubmitted, handleSubmit]);
 
   // Timer effect - disabled for now
   // useEffect(() => {
@@ -242,19 +286,20 @@ export default function Exam() {
 
     const handleVisibilityChange = () => {
       if (document.hidden && exam) {
-        logViolation("tab_switch", "Student switched tabs", "high");
+        logViolation("WINDOW_BLUR", "Student switched tabs or lost focus", "medium");
       }
     };
 
     const handleFullscreenChange = () => {
       if (!document.fullscreenElement && exam) {
-        logViolation("fullscreen_exit", "Student exited fullscreen", "high");
+        logViolation("SHORTCUT_ATTEMPT", "Student exited fullscreen mode", "high");
       }
     };
 
     const handleContextMenu = (e) => {
       e.preventDefault();
-      logViolation("right_click", "Right-click attempted", "low");
+      // Don't log right-click as violation, just block it
+      console.log('Right-click blocked during exam');
       return false;
     };
 
@@ -317,8 +362,11 @@ export default function Exam() {
 
         // Listen for window blur events
         const blurCleanup = window.electronAPI.onWindowBlur(() => {
-          setBlurWarningCount(prev => prev + 1);
-          setWarningMessage(`Warning: Window focus lost (${blurWarningCount + 1}). This has been logged as a violation.`);
+          setBlurWarningCount(prev => {
+            const newCount = prev + 1;
+            setWarningMessage(`Warning: Window focus lost (${newCount}). This has been logged as a violation.`);
+            return newCount;
+          });
           setShowWarning(true);
           // Hide warning after 5 seconds
           setTimeout(() => setShowWarning(false), 5000);
@@ -409,6 +457,50 @@ export default function Exam() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-4">
       <div className="max-w-6xl mx-auto">
+        {/* SEB Security Status Banner */}
+        <div className={`rounded-xl shadow-lg p-4 mb-4 border-2 ${
+          violations.length === 0 
+            ? 'bg-green-50 border-green-300' 
+            : violations.length < (exam.maxViolations || 3) 
+              ? 'bg-yellow-50 border-yellow-400' 
+              : 'bg-red-50 border-red-400'
+        }`}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <span className="text-2xl mr-3">
+                {violations.length === 0 ? '🔒' : violations.length < (exam.maxViolations || 3) ? '⚠️' : '🚨'}
+              </span>
+              <div>
+                <h3 className="font-bold text-gray-800">SEB Security Monitor</h3>
+                <p className="text-sm text-gray-600">
+                  {violations.length === 0 
+                    ? 'Exam session secure - No violations detected' 
+                    : `${violations.length} violation(s) detected of ${exam.maxViolations || 3} max`
+                  }
+                </p>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className={`text-lg font-bold ${
+                violations.length === 0 ? 'text-green-600' : 
+                violations.length < (exam.maxViolations || 3) ? 'text-yellow-600' : 'text-red-600'
+              }`}>
+                Violations: {violations.length}/{exam.maxViolations || 3}
+              </div>
+              {violations.length > 0 && violations.length < (exam.maxViolations || 3) && (
+                <p className="text-xs text-yellow-700 mt-1">
+                  ⚠️ {(exam.maxViolations || 3) - violations.length} warning(s) left before auto-submit
+                </p>
+              )}
+              {violations.length >= (exam.maxViolations || 3) && (
+                <p className="text-xs text-red-700 mt-1 font-bold">
+                  🚨 Exam will be auto-submitted!
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+
         {/* Header */}
         <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border border-gray-200">
           <div className="flex justify-between items-center">
@@ -418,7 +510,11 @@ export default function Exam() {
                 Question {currentQuestion + 1} of {exam.questions.length}
               </p>
             </div>
-            <Timer duration={exam.duration} onTimeUp={handleSubmit} />
+            <Timer 
+              duration={exam.duration} 
+              onTimeUp={handleSubmit} 
+              initialTime={timeRemaining > 0 ? timeRemaining : null}
+            />
           </div>
 
           {/* Progress Bar */}

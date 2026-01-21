@@ -1,16 +1,37 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 
-export default function Timer({ duration, onTimeUp }) {
-  const [timeRemaining, setTimeRemaining] = useState(duration * 60); // Convert minutes to seconds
+export default function Timer({ duration, onTimeUp, initialTime }) {
+  // Use initialTime if provided (for resuming), otherwise use duration in seconds
+  const [timeRemaining, setTimeRemaining] = useState(
+    initialTime || (duration * 60)
+  );
+  const hasSubmittedRef = useRef(false);
 
   useEffect(() => {
-    if (timeRemaining <= 0) {
-      onTimeUp();
+    // Reset timer if duration changes
+    if (initialTime) {
+      setTimeRemaining(initialTime);
+    } else if (duration) {
+      setTimeRemaining(duration * 60);
+    }
+  }, [duration, initialTime]);
+
+  useEffect(() => {
+    if (timeRemaining <= 0 && !hasSubmittedRef.current) {
+      hasSubmittedRef.current = true;
+      if (onTimeUp) onTimeUp();
       return;
     }
 
+    if (timeRemaining <= 0) return;
+
     const timer = setInterval(() => {
-      setTimeRemaining((prev) => prev - 1);
+      setTimeRemaining((prev) => {
+        if (prev <= 1) {
+          return 0;
+        }
+        return prev - 1;
+      });
     }, 1000);
 
     return () => clearInterval(timer);

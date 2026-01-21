@@ -9,6 +9,7 @@ export const API_ENDPOINTS = {
   // Authentication
   LOGIN: `${API_BASE_URL}/auth/login`,
   REGISTER: `${API_BASE_URL}/auth/register`,
+  GOOGLE_AUTH: `${API_BASE_URL}/auth/google`,
   PROFILE: `${API_BASE_URL}/auth/profile`,
   REFRESH: `${API_BASE_URL}/auth/refresh`,
   LOGOUT: `${API_BASE_URL}/auth/logout`,
@@ -20,6 +21,8 @@ export const API_ENDPOINTS = {
   EXAM_START: (id) => `${API_BASE_URL}/exam/${id}/start`,
   SUBMIT_EXAM: (id) => `${API_BASE_URL}/exam/${id}/submit`,
   EXAM_RESULTS: (id) => `${API_BASE_URL}/exam/${id}/results`,
+  EXAM_IMPORT_CSV: `${API_BASE_URL}/exam/import-csv`,
+  EXAM_IMPORT_URL: `${API_BASE_URL}/exam/import-url`,
 
   // Answers
   ANSWER_SAVE: `${API_BASE_URL}/answer/save`,

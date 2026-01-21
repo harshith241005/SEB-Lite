@@ -1,11 +1,106 @@
 const express = require("express");
 const mongoose = require("mongoose");
+const multer = require("multer");
+const axios = require("axios");
 const authMiddleware = require("../middleware/authMiddleware");
 const Exam = require("../models/Exam");
 const Answer = require("../models/Answer");
 const Violation = require("../models/Violation");
 
 const router = express.Router();
+
+// Configure multer for CSV file uploads
+const storage = multer.memoryStorage();
+const upload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === "text/csv" || file.originalname.endsWith(".csv") || 
+        file.mimetype === "application/json" || file.originalname.endsWith(".json")) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only CSV and JSON files are allowed"));
+    }
+  },
+});
+
+// Parse CSV content to questions array
+const parseCSV = (csvContent) => {
+  const lines = csvContent.split("\n").filter(line => line.trim());
+  if (lines.length < 2) {
+    throw new Error("CSV must have a header row and at least one question");
+  }
+
+  const header = lines[0].toLowerCase().split(",").map(h => h.trim());
+  
+  // Expected columns: question, option1, option2, option3, option4, correct_answer, category, difficulty
+  const requiredCols = ["question", "option1", "option2", "option3", "option4", "correct_answer"];
+  const missingCols = requiredCols.filter(col => !header.includes(col));
+  
+  if (missingCols.length > 0) {
+    throw new Error(`Missing required columns: ${missingCols.join(", ")}`);
+  }
+
+  const questions = [];
+  
+  for (let i = 1; i < lines.length; i++) {
+    const values = parseCSVLine(lines[i]);
+    if (values.length < header.length) continue;
+
+    const row = {};
+    header.forEach((col, idx) => {
+      row[col] = values[idx]?.trim() || "";
+    });
+
+    // Find correct answer index (1-based in CSV, convert to 0-based)
+    let correctIndex = parseInt(row.correct_answer, 10);
+    if (isNaN(correctIndex)) {
+      // Try matching option text
+      const options = [row.option1, row.option2, row.option3, row.option4];
+      correctIndex = options.findIndex(opt => 
+        opt.toLowerCase() === row.correct_answer.toLowerCase()
+      );
+    } else {
+      correctIndex = correctIndex - 1; // Convert 1-based to 0-based
+    }
+
+    if (correctIndex < 0 || correctIndex > 3) {
+      console.warn(`Skipping row ${i + 1}: Invalid correct answer`);
+      continue;
+    }
+
+    questions.push({
+      prompt: row.question,
+      options: [row.option1, row.option2, row.option3, row.option4],
+      correctOptionIndex: correctIndex,
+      category: row.category || "General",
+      difficulty: row.difficulty || "medium",
+    });
+  }
+
+  return questions;
+};
+
+// Helper to parse CSV line (handles quoted values)
+const parseCSVLine = (line) => {
+  const values = [];
+  let current = "";
+  let inQuotes = false;
+  
+  for (let char of line) {
+    if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === "," && !inQuotes) {
+      values.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  values.push(current);
+  
+  return values.map(v => v.replace(/^"|"$/g, "").trim());
+};
 
 const sanitizeQuestion = (question, index) => ({
   questionIndex: index,
@@ -32,6 +127,270 @@ const sanitizeExamMeta = (exam) => ({
 });
 
 const validateObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
+
+// Create exam directly via JSON body
+router.post("/", authMiddleware, async (req, res) => {
+  try {
+    if (!["instructor", "admin"].includes(req.role)) {
+      return res.status(403).json({ error: "Instructor or admin access required." });
+    }
+
+    const {
+      title,
+      description,
+      duration,
+      passingPercentage = 60,
+      maxViolations = 3,
+      instructions,
+      questions,
+      company = "General",
+      type = "PLACEMENT_QUIZ"
+    } = req.body;
+
+    if (!title) {
+      return res.status(400).json({ error: "Exam title is required" });
+    }
+
+    if (!questions || !Array.isArray(questions) || questions.length === 0) {
+      return res.status(400).json({ error: "At least one question is required" });
+    }
+
+    if (!duration || duration <= 0) {
+      return res.status(400).json({ error: "Valid duration is required" });
+    }
+
+    // Normalize questions to our format
+    const normalizedQuestions = questions.map((q, index) => {
+      const prompt = q.prompt || q.question || q.questionText || q.text;
+      const options = q.options || [q.option1, q.option2, q.option3, q.option4].filter(Boolean);
+      
+      let correctIndex = -1;
+      if (typeof q.correctOptionIndex === "number") {
+        correctIndex = q.correctOptionIndex;
+      } else if (typeof q.correct === "number") {
+        correctIndex = q.correct;
+      } else if (typeof q.correctAnswer === "string") {
+        correctIndex = options.findIndex(opt => 
+          opt.toLowerCase() === q.correctAnswer.toLowerCase()
+        );
+      } else if (typeof q.correctAnswer === "number") {
+        correctIndex = q.correctAnswer;
+      }
+
+      if (!prompt) {
+        throw new Error(`Question ${index + 1} is missing a question text`);
+      }
+
+      if (options.length < 2) {
+        throw new Error(`Question ${index + 1} must have at least 2 options`);
+      }
+
+      if (correctIndex < 0 || correctIndex >= options.length) {
+        throw new Error(`Question ${index + 1} has an invalid correct answer`);
+      }
+
+      return {
+        prompt: prompt.trim(),
+        options: options.map(o => String(o).trim()),
+        correctOptionIndex: correctIndex,
+        category: q.category || "General",
+        difficulty: q.difficulty || "Medium",
+        explanation: q.explanation || "",
+      };
+    });
+
+    const exam = await Exam.create({
+      title: title.trim(),
+      description: description || `Exam with ${normalizedQuestions.length} questions`,
+      duration: parseInt(duration, 10),
+      passingPercentage: parseInt(passingPercentage, 10),
+      maxViolations: parseInt(maxViolations, 10),
+      instructions: Array.isArray(instructions) ? instructions : 
+        (instructions ? [instructions] : ["Answer all questions carefully."]),
+      questions: normalizedQuestions,
+      company,
+      type,
+      instructor: req.userId,
+      isActive: true,
+    });
+
+    res.status(201).json({
+      message: `Exam created successfully with ${normalizedQuestions.length} questions`,
+      exam: sanitizeExamMeta(exam),
+    });
+  } catch (error) {
+    console.error("Create exam error:", error);
+    res.status(400).json({ error: error.message || "Failed to create exam" });
+  }
+});
+
+// Import exam from CSV file
+router.post("/import-csv", authMiddleware, upload.single("file"), async (req, res) => {
+  try {
+    if (!["instructor", "admin"].includes(req.role)) {
+      return res.status(403).json({ error: "Instructor or admin access required." });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+
+    const { title, duration, passingPercentage, instructions, description } = req.body;
+
+    if (!title) {
+      return res.status(400).json({ error: "Exam title is required" });
+    }
+
+    const fileContent = req.file.buffer.toString("utf-8");
+    let questions;
+
+    if (req.file.originalname.endsWith(".json")) {
+      // Parse JSON
+      const jsonData = JSON.parse(fileContent);
+      questions = jsonData.questions || jsonData;
+      
+      // Normalize JSON questions to our format
+      questions = questions.map((q, idx) => ({
+        prompt: q.prompt || q.question || q.questionText,
+        options: q.options || [q.option1, q.option2, q.option3, q.option4],
+        correctOptionIndex: typeof q.correctOptionIndex === "number" 
+          ? q.correctOptionIndex 
+          : (q.correct !== undefined ? q.correct : parseInt(q.correctAnswer, 10) - 1),
+        category: q.category || "General",
+        difficulty: q.difficulty || "medium",
+      }));
+    } else {
+      // Parse CSV
+      questions = parseCSV(fileContent);
+    }
+
+    if (questions.length === 0) {
+      return res.status(400).json({ error: "No valid questions found in file" });
+    }
+
+    const exam = await Exam.create({
+      title,
+      description: description || `Imported exam with ${questions.length} questions`,
+      duration: parseInt(duration, 10) || 60,
+      passingPercentage: parseInt(passingPercentage, 10) || 60,
+      instructions: instructions || "Answer all questions carefully.",
+      questions,
+      instructor: req.userId,
+      isActive: true,
+    });
+
+    res.status(201).json({
+      message: `Exam created successfully with ${questions.length} questions`,
+      exam: sanitizeExamMeta(exam),
+    });
+  } catch (error) {
+    console.error("CSV import error:", error);
+    res.status(500).json({ error: error.message || "Failed to import exam" });
+  }
+});
+
+// Import exam from URL (JSON or CSV)
+router.post("/import-url", authMiddleware, async (req, res) => {
+  try {
+    if (!["instructor", "admin"].includes(req.role)) {
+      return res.status(403).json({ error: "Instructor or admin access required." });
+    }
+
+    const { url, title, duration, passingPercentage, instructions, description } = req.body;
+
+    if (!url) {
+      return res.status(400).json({ error: "URL is required" });
+    }
+
+    if (!title) {
+      return res.status(400).json({ error: "Exam title is required" });
+    }
+
+    // Validate URL
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(url);
+      if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+        throw new Error("Invalid protocol");
+      }
+    } catch {
+      return res.status(400).json({ error: "Invalid URL format" });
+    }
+
+    // Fetch content from URL
+    let response;
+    try {
+      response = await axios.get(url, { 
+        timeout: 30000,
+        maxContentLength: 10 * 1024 * 1024, // 10MB limit
+        headers: {
+          "User-Agent": "SEB-Lite-Exam-Importer/1.0",
+        },
+      });
+    } catch (fetchError) {
+      return res.status(400).json({ 
+        error: `Failed to fetch URL: ${fetchError.message}` 
+      });
+    }
+
+    const content = typeof response.data === "string" 
+      ? response.data 
+      : JSON.stringify(response.data);
+    
+    let questions;
+    const isJSON = url.endsWith(".json") || 
+                   response.headers["content-type"]?.includes("application/json") ||
+                   content.trim().startsWith("{") || 
+                   content.trim().startsWith("[");
+
+    if (isJSON) {
+      // Parse JSON
+      const jsonData = typeof response.data === "string" 
+        ? JSON.parse(content) 
+        : response.data;
+      
+      questions = jsonData.questions || (Array.isArray(jsonData) ? jsonData : []);
+      
+      // Normalize JSON questions
+      questions = questions.map((q) => ({
+        prompt: q.prompt || q.question || q.questionText,
+        options: q.options || [q.option1, q.option2, q.option3, q.option4],
+        correctOptionIndex: typeof q.correctOptionIndex === "number" 
+          ? q.correctOptionIndex 
+          : (q.correct !== undefined ? q.correct : parseInt(q.correctAnswer, 10) - 1),
+        category: q.category || "General",
+        difficulty: q.difficulty || "medium",
+      }));
+    } else {
+      // Parse CSV
+      questions = parseCSV(content);
+    }
+
+    if (questions.length === 0) {
+      return res.status(400).json({ error: "No valid questions found at URL" });
+    }
+
+    const exam = await Exam.create({
+      title,
+      description: description || `Imported from URL with ${questions.length} questions`,
+      duration: parseInt(duration, 10) || 60,
+      passingPercentage: parseInt(passingPercentage, 10) || 60,
+      instructions: instructions || "Answer all questions carefully.",
+      questions,
+      instructor: req.userId,
+      isActive: true,
+      sourceUrl: url,
+    });
+
+    res.status(201).json({
+      message: `Exam created successfully with ${questions.length} questions from URL`,
+      exam: sanitizeExamMeta(exam),
+    });
+  } catch (error) {
+    console.error("URL import error:", error);
+    res.status(500).json({ error: error.message || "Failed to import exam from URL" });
+  }
+});
 
 // Student dashboard view of available/completed exams
 router.get("/available", authMiddleware, async (req, res) => {
@@ -375,6 +734,168 @@ router.get("/:id", authMiddleware, async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch exam." });
+  }
+});
+
+// Submit exam answers
+router.post("/:id/submit", authMiddleware, async (req, res) => {
+  try {
+    if (!validateObjectId(req.params.id)) {
+      return res.status(400).json({ error: "Invalid exam id." });
+    }
+
+    const exam = await Exam.findById(req.params.id).lean();
+    if (!exam) {
+      return res.status(404).json({ error: "Exam not found." });
+    }
+
+    const attempt = await Answer.findOne({
+      examId: req.params.id,
+      studentId: req.userId,
+    });
+
+    if (!attempt) {
+      return res.status(404).json({ error: "No active attempt found." });
+    }
+
+    if (attempt.status !== "in-progress") {
+      return res.status(400).json({ error: "Exam already submitted." });
+    }
+
+    const { answers = [], violations = 0 } = req.body;
+
+    // Process answers
+    const processedAnswers = answers.map((ans) => ({
+      questionIndex: ans.questionIndex,
+      selectedOption: typeof ans.selectedOption === "number" ? ans.selectedOption : null,
+      timeSpent: ans.timeSpent || 0,
+    }));
+
+    // Calculate score
+    let correctCount = 0;
+    processedAnswers.forEach((ans) => {
+      if (ans.selectedOption !== null && ans.questionIndex < exam.questions.length) {
+        const question = exam.questions[ans.questionIndex];
+        if (question && ans.selectedOption === question.correctOptionIndex) {
+          correctCount++;
+        }
+      }
+    });
+
+    const totalQuestions = exam.questions.length;
+    const percentage = totalQuestions > 0 ? (correctCount / totalQuestions) * 100 : 0;
+    const passed = percentage >= (exam.passingPercentage || 60);
+
+    // Update attempt
+    attempt.answers = processedAnswers;
+    attempt.correctAnswers = correctCount;
+    attempt.totalQuestions = totalQuestions;
+    attempt.percentage = percentage;
+    attempt.status = "submitted";
+    attempt.submittedAt = new Date();
+    attempt.violationsCount = violations;
+
+    await attempt.save();
+
+    res.json({
+      message: "Exam submitted successfully",
+      score: percentage,
+      correctAnswers: correctCount,
+      totalQuestions,
+      passed,
+    });
+  } catch (error) {
+    console.error("Submit exam error:", error);
+    res.status(500).json({ error: "Failed to submit exam." });
+  }
+});
+
+// Update exam (toggle active status, update settings)
+router.put("/:id", authMiddleware, async (req, res) => {
+  try {
+    if (!validateObjectId(req.params.id)) {
+      return res.status(400).json({ error: "Invalid exam id." });
+    }
+
+    if (!["instructor", "admin"].includes(req.role)) {
+      return res.status(403).json({ error: "Instructor or admin access required." });
+    }
+
+    const exam = await Exam.findById(req.params.id);
+    if (!exam) {
+      return res.status(404).json({ error: "Exam not found." });
+    }
+
+    // Check ownership for instructors
+    if (req.role === "instructor" && String(exam.instructor) !== req.userId) {
+      return res.status(403).json({ error: "Not authorized to modify this exam." });
+    }
+
+    const { isActive, maxViolations, duration, passingPercentage, title, description } = req.body;
+
+    // Update allowed fields
+    if (typeof isActive === "boolean") {
+      exam.isActive = isActive;
+    }
+    if (maxViolations !== undefined) {
+      exam.maxViolations = Number(maxViolations);
+    }
+    if (duration !== undefined) {
+      exam.duration = Number(duration);
+    }
+    if (passingPercentage !== undefined) {
+      exam.passingPercentage = Number(passingPercentage);
+    }
+    if (title) {
+      exam.title = title.trim();
+    }
+    if (description !== undefined) {
+      exam.description = description;
+    }
+
+    await exam.save();
+
+    res.json({
+      message: "Exam updated successfully",
+      exam: sanitizeExamMeta(exam),
+    });
+  } catch (error) {
+    console.error("Update exam error:", error);
+    res.status(500).json({ error: "Failed to update exam." });
+  }
+});
+
+// Delete exam
+router.delete("/:id", authMiddleware, async (req, res) => {
+  try {
+    if (!validateObjectId(req.params.id)) {
+      return res.status(400).json({ error: "Invalid exam id." });
+    }
+
+    if (!["instructor", "admin"].includes(req.role)) {
+      return res.status(403).json({ error: "Instructor or admin access required." });
+    }
+
+    const exam = await Exam.findById(req.params.id);
+    if (!exam) {
+      return res.status(404).json({ error: "Exam not found." });
+    }
+
+    // Check ownership for instructors
+    if (req.role === "instructor" && String(exam.instructor) !== req.userId) {
+      return res.status(403).json({ error: "Not authorized to delete this exam." });
+    }
+
+    await Exam.findByIdAndDelete(req.params.id);
+
+    // Also delete related answers and violations
+    await Answer.deleteMany({ examId: req.params.id });
+    await Violation.deleteMany({ examId: req.params.id });
+
+    res.json({ message: "Exam deleted successfully" });
+  } catch (error) {
+    console.error("Delete exam error:", error);
+    res.status(500).json({ error: "Failed to delete exam." });
   }
 });
 

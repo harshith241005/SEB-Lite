@@ -2,13 +2,14 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { API_ENDPOINTS, axiosConfig } from "../utils/api";
-import { getUser, getAccessToken, clearAuth } from "../utils/auth";
+import { getUser, getAccessToken, clearAuth, isAuthenticated } from "../utils/auth";
 
 export default function StudentDashboard() {
   const [availableExams, setAvailableExams] = useState([]);
   const [completedExams, setCompletedExams] = useState([]);
   const [stats, setStats] = useState({ totalAvailable: 0, totalCompleted: 0, averageScore: 0 });
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState('available');
   const navigate = useNavigate();
 
@@ -26,6 +27,7 @@ export default function StudentDashboard() {
 
   const fetchDashboardData = useCallback(async () => {
     try {
+      setError("");
       const response = await axios.get(API_ENDPOINTS.EXAMS_AVAILABLE, authConfig);
       const data = response.data;
 
@@ -34,14 +36,27 @@ export default function StudentDashboard() {
       setStats(data.stats || { totalAvailable: 0, totalCompleted: 0, averageScore: 0 });
     } catch (err) {
       console.error("Failed to fetch dashboard data:", err);
+      if (err.response?.status === 401) {
+        setError("Session expired. Please login again.");
+        setTimeout(() => {
+          clearAuth();
+          navigate("/login");
+        }, 2000);
+      } else {
+        setError("Failed to load exams. Please try again.");
+      }
     } finally {
       setLoading(false);
     }
-  }, [authConfig]);
+  }, [authConfig, navigate]);
 
   useEffect(() => {
-    if (!token || (user.role && user.role !== 'student')) {
+    if (!token || !isAuthenticated()) {
       navigate("/login");
+      return;
+    }
+    if (user.role && user.role !== 'student') {
+      navigate("/instructor-dashboard");
       return;
     }
     fetchDashboardData();
@@ -69,7 +84,31 @@ export default function StudentDashboard() {
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-100">
-        <div className="text-xl font-semibold text-gray-700">Loading dashboard...</div>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
+          <div className="text-xl font-semibold text-gray-700">Loading dashboard...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-100">
+        <div className="text-center bg-white rounded-lg shadow-lg p-8 max-w-md">
+          <div className="text-6xl mb-4">⚠️</div>
+          <p className="text-red-600 font-semibold mb-4">{error}</p>
+          <button
+            onClick={() => {
+              setLoading(true);
+              setError("");
+              fetchDashboardData();
+            }}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-lg transition"
+          >
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
@@ -167,24 +206,47 @@ export default function StudentDashboard() {
               <p className="text-sm text-gray-600">Exams you can take right now</p>
             </div>
             <div className="p-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {availableExams.map((exam) => (
-                  <div key={exam._id || exam.id} className="exam-card bg-gradient-to-br from-blue-50 to-indigo-100 border border-blue-200 rounded-lg p-6 hover:shadow-lg transition-shadow">
-                    <div className="mb-4">
-                      <h3 className="text-xl font-semibold text-gray-900 mb-2">{exam.title}</h3>
-                      <p className="text-sm text-gray-600 mb-1"><strong>Company:</strong> {exam.company}</p>
-                      <p className="text-sm text-gray-600 mb-1"><strong>Type:</strong> {exam.type}</p>
-                      <p className="text-sm text-gray-600"><strong>Duration:</strong> {exam.duration} mins</p>
+              {availableExams.length === 0 ? (
+                <div className="text-center py-12">
+                  <div className="text-6xl mb-4">📚</div>
+                  <h3 className="text-xl font-semibold text-gray-700 mb-2">No Active Exams Available</h3>
+                  <p className="text-gray-500">There are no exams available for you to take at this time.</p>
+                  <p className="text-gray-400 text-sm mt-2">Check back later or contact your instructor.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {availableExams.map((exam) => (
+                    <div key={exam._id || exam.id} className="exam-card bg-gradient-to-br from-blue-50 to-indigo-100 border border-blue-200 rounded-lg p-6 hover:shadow-lg transition-shadow">
+                      {/* Status Badge */}
+                      <div className="flex justify-between items-start mb-3">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                          ✅ Available
+                        </span>
+                        {exam.type && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                            {exam.type.replace('_', ' ')}
+                          </span>
+                        )}
+                      </div>
+                      <div className="mb-4">
+                        <h3 className="text-xl font-semibold text-gray-900 mb-2">{exam.title || 'Untitled Exam'}</h3>
+                        {exam.company && exam.company !== 'General' && (
+                          <p className="text-sm text-gray-600 mb-1"><strong>Company:</strong> {exam.company}</p>
+                        )}
+                        <p className="text-sm text-gray-600 mb-1"><strong>Duration:</strong> {exam.duration || 60} mins</p>
+                        <p className="text-sm text-gray-600 mb-1"><strong>Questions:</strong> {exam.questionCount || exam.totalQuestions || 'N/A'}</p>
+                        <p className="text-sm text-gray-600"><strong>Max Violations:</strong> {exam.maxViolations || 3}</p>
+                      </div>
+                      <button
+                        onClick={() => handleTakeExam(exam._id || exam.id)}
+                        className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition"
+                      >
+                        📝 Start Exam
+                      </button>
                     </div>
-                    <button
-                      onClick={() => handleTakeExam(exam._id || exam.id)}
-                      className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition"
-                    >
-                      Start Quiz
-                    </button>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}

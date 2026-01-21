@@ -31,6 +31,11 @@ export default function CreateExam() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [showImportModal, setShowImportModal] = useState(false);
+  const [importType, setImportType] = useState('file'); // 'file', 'url', 'csv'
+  const [importUrl, setImportUrl] = useState('');
+  const [importTitle, setImportTitle] = useState('');
+  const [importDuration, setImportDuration] = useState(60);
+  const [importPassingPercentage, setImportPassingPercentage] = useState(60);
   const fileInputRef = useRef(null);
   const navigate = useNavigate();
 
@@ -120,17 +125,26 @@ export default function CreateExam() {
     const file = e.target.files[0];
     if (!file) return;
 
+    if (!importTitle.trim()) {
+      setError('Please enter an exam title before importing');
+      return;
+    }
+
     setError('');
+    setSuccess('');
     setLoading(true);
 
     try {
-      const formData = new FormData();
-      formData.append('examFile', file);
+      const formDataUpload = new FormData();
+      formDataUpload.append('file', file);
+      formDataUpload.append('title', importTitle);
+      formDataUpload.append('duration', importDuration.toString());
+      formDataUpload.append('passingPercentage', importPassingPercentage.toString());
 
       const currentToken = getAccessToken();
       await axios.post(
-        `${API_ENDPOINTS.EXAMS}/import`,
-        formData,
+        API_ENDPOINTS.EXAM_IMPORT_CSV,
+        formDataUpload,
         {
           headers: {
             'Content-Type': 'multipart/form-data',
@@ -141,6 +155,7 @@ export default function CreateExam() {
 
       setSuccess('Exam imported successfully!');
       setShowImportModal(false);
+      resetImportForm();
       setTimeout(() => {
         navigate('/instructor-dashboard');
       }, 2000);
@@ -151,6 +166,62 @@ export default function CreateExam() {
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
+    }
+  };
+
+  const handleUrlImport = async () => {
+    if (!importUrl.trim()) {
+      setError('Please enter a URL');
+      return;
+    }
+
+    if (!importTitle.trim()) {
+      setError('Please enter an exam title');
+      return;
+    }
+
+    setError('');
+    setLoading(true);
+
+    try {
+      const currentToken = getAccessToken();
+      await axios.post(
+        API_ENDPOINTS.EXAM_IMPORT_URL,
+        {
+          url: importUrl,
+          title: importTitle,
+          duration: importDuration,
+          passingPercentage: importPassingPercentage,
+        },
+        {
+          headers: {
+            ...axiosConfig.headers,
+            Authorization: `Bearer ${currentToken}`,
+          },
+        }
+      );
+
+      setSuccess('Exam imported successfully from URL!');
+      setShowImportModal(false);
+      resetImportForm();
+      setTimeout(() => {
+        navigate('/instructor-dashboard');
+      }, 2000);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to import exam from URL');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resetImportForm = () => {
+    setImportUrl('');
+    setImportTitle('');
+    setImportDuration(60);
+    setImportPassingPercentage(60);
+    setImportType('file');
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
     }
   };
 
@@ -230,7 +301,7 @@ export default function CreateExam() {
               onClick={() => setShowImportModal(true)}
               className="px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-xl hover:from-purple-700 hover:to-pink-700 transition-all duration-200 font-semibold shadow-lg transform hover:scale-105"
             >
-              📥 Import from JSON
+              📥 Import Exam
             </button>
           </div>
         </div>
@@ -238,36 +309,182 @@ export default function CreateExam() {
         {/* Import Modal */}
         {showImportModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md w-full mx-4">
-              <h2 className="text-2xl font-bold text-gray-900 mb-4">Import Exam from JSON</h2>
-              <p className="text-gray-600 mb-6">
-                Upload a JSON file with exam data. Format:
-              </p>
-              <pre className="bg-gray-100 p-4 rounded-lg text-xs mb-6 overflow-auto">
+            <div className="bg-white rounded-xl shadow-2xl p-8 max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
+              <h2 className="text-2xl font-bold text-gray-900 mb-4">Import Exam</h2>
+              
+              {/* Import Type Tabs */}
+              <div className="flex gap-2 mb-6">
+                <button
+                  onClick={() => setImportType('file')}
+                  className={`px-4 py-2 rounded-lg font-medium transition ${
+                    importType === 'file'
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
+                >
+                  📁 File Upload
+                </button>
+                <button
+                  onClick={() => setImportType('url')}
+                  className={`px-4 py-2 rounded-lg font-medium transition ${
+                    importType === 'url'
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
+                >
+                  🔗 Import from URL
+                </button>
+              </div>
+
+              {/* Common Fields */}
+              <div className="space-y-4 mb-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Exam Title *
+                  </label>
+                  <input
+                    type="text"
+                    value={importTitle}
+                    onChange={(e) => setImportTitle(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                    placeholder="Enter exam title"
+                    required
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Duration (min)
+                    </label>
+                    <input
+                      type="number"
+                      value={importDuration}
+                      onChange={(e) => setImportDuration(parseInt(e.target.value) || 60)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                      min="5"
+                      max="480"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Passing %
+                    </label>
+                    <input
+                      type="number"
+                      value={importPassingPercentage}
+                      onChange={(e) => setImportPassingPercentage(parseInt(e.target.value) || 60)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                      min="0"
+                      max="100"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* File Upload Section */}
+              {importType === 'file' && (
+                <div className="mb-6">
+                  <p className="text-gray-600 mb-4 text-sm">
+                    Upload a CSV or JSON file with questions.
+                  </p>
+                  
+                  <div className="bg-gray-50 p-4 rounded-lg mb-4">
+                    <p className="text-sm font-medium text-gray-700 mb-2">CSV Format:</p>
+                    <pre className="bg-gray-100 p-2 rounded text-xs overflow-auto">
+{`question,option1,option2,option3,option4,correct_answer,category,difficulty
+"What is 2+2?",2,3,4,5,3,Math,easy
+"Capital of France?",London,Paris,Berlin,Madrid,2,Geography,medium`}
+                    </pre>
+                  </div>
+                  
+                  <div className="bg-gray-50 p-4 rounded-lg mb-4">
+                    <p className="text-sm font-medium text-gray-700 mb-2">JSON Format:</p>
+                    <pre className="bg-gray-100 p-2 rounded text-xs overflow-auto">
 {`{
-  "title": "Exam Title",
-  "duration": 60,
   "questions": [
     {
-      "question": "Question text?",
+      "prompt": "Question text?",
       "options": ["A", "B", "C", "D"],
-      "correct": 1
+      "correctOptionIndex": 1
     }
   ]
 }`}
-              </pre>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".json,application/json"
-                onChange={handleFileImport}
-                className="mb-4 w-full"
-              />
+                    </pre>
+                  </div>
+                  
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".json,.csv,application/json,text/csv"
+                    onChange={handleFileImport}
+                    className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+                  />
+                </div>
+              )}
+
+              {/* URL Import Section */}
+              {importType === 'url' && (
+                <div className="mb-6">
+                  <p className="text-gray-600 mb-4 text-sm">
+                    Import questions from a URL (JSON or CSV). Great for using shared question banks!
+                  </p>
+                  
+                  <div className="bg-blue-50 p-4 rounded-lg mb-4">
+                    <p className="text-sm font-medium text-blue-700 mb-2">💡 Example Sources:</p>
+                    <ul className="text-xs text-blue-600 space-y-1">
+                      <li>• GitHub raw file URLs</li>
+                      <li>• Google Sheets (published as CSV)</li>
+                      <li>• Any public JSON/CSV endpoint</li>
+                    </ul>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      URL *
+                    </label>
+                    <input
+                      type="url"
+                      value={importUrl}
+                      onChange={(e) => setImportUrl(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                      placeholder="https://example.com/questions.json"
+                      required
+                    />
+                  </div>
+                  
+                  <button
+                    onClick={handleUrlImport}
+                    disabled={loading || !importUrl || !importTitle}
+                    className="mt-4 w-full px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition flex items-center justify-center"
+                  >
+                    {loading ? (
+                      <>
+                        <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Importing...
+                      </>
+                    ) : (
+                      '🔗 Import from URL'
+                    )}
+                  </button>
+                </div>
+              )}
+
+              {/* Error in Modal */}
+              {error && (
+                <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4 text-sm">
+                  {error}
+                </div>
+              )}
+
               <div className="flex gap-4">
                 <button
                   onClick={() => {
                     setShowImportModal(false);
-                    if (fileInputRef.current) fileInputRef.current.value = '';
+                    resetImportForm();
+                    setError('');
                   }}
                   className="flex-1 px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition"
                 >

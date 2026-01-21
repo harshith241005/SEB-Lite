@@ -65,18 +65,13 @@ const normaliseQuestion = (rawQuestion, index) => {
     throw new Error(`Question ${index + 1} has an invalid correct answer index.`);
   }
 
-  const category = rawQuestion.category || rawQuestion.topic;
-  if (!ALLOWED_CATEGORIES.includes(category)) {
-    throw new Error(
-      `Question ${index + 1} has invalid category. Allowed: ${ALLOWED_CATEGORIES.join(", ")}.`
-    );
-  }
+  // Allow any category, use General as default
+  const category = rawQuestion.category || rawQuestion.topic || "General";
 
-  const difficulty = rawQuestion.difficulty || "Medium";
-  if (!ALLOWED_DIFFICULTIES.includes(difficulty)) {
-    throw new Error(
-      `Question ${index + 1} has invalid difficulty. Allowed: ${ALLOWED_DIFFICULTIES.join(", ")}.`
-    );
+  // Allow any difficulty, normalize to proper case
+  let difficulty = rawQuestion.difficulty || "Medium";
+  if (typeof difficulty === 'string') {
+    difficulty = difficulty.charAt(0).toUpperCase() + difficulty.slice(1).toLowerCase();
   }
 
   return {

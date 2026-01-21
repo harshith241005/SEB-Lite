@@ -79,6 +79,56 @@ SEB-Lite/
 
 That's it! Your secure exam browser is ready.
 
+## 📋 Exam JSON Import Format
+
+Exams are imported via JSON files. **No questions are hardcoded** in the application.
+
+### JSON Schema
+
+```json
+{
+  "title": "Exam Title",
+  "company": "Company Name",
+  "duration": 60,
+  "maxViolations": 3,
+  "passingPercentage": 60,
+  "questions": [
+    {
+      "question": "What is the correct answer?",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "correct": 0,
+      "category": "General",
+      "difficulty": "Medium"
+    }
+  ]
+}
+```
+
+### Field Descriptions
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `title` | string | ✅ | Exam title displayed to students |
+| `duration` | number | ✅ | Exam duration in minutes |
+| `questions` | array | ✅ | Array of question objects |
+| `company` | string | ❌ | Company name (default: "General") |
+| `maxViolations` | number | ❌ | Max allowed violations before auto-submit (default: 3) |
+| `passingPercentage` | number | ❌ | Minimum score to pass (default: 60) |
+
+### Question Object
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `question` | string | ✅ | The question text |
+| `options` | array | ✅ | Array of 2-6 answer options |
+| `correct` | number | ✅ | Zero-based index of correct answer |
+| `category` | string | ❌ | Question category (default: "General") |
+| `difficulty` | string | ❌ | Easy/Medium/Hard (default: "Medium") |
+
+### Sample Exam File
+
+See `examples/sample-exam.json` for a complete example.
+
 ### Prerequisites
 - Node.js (v16 or higher)
 - MongoDB (local installation or MongoDB Atlas cloud account)

@@ -2,13 +2,14 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { API_ENDPOINTS, axiosConfig } from "../utils/api";
-import { getUser, getAccessToken, clearAuth } from "../utils/auth";
+import { getUser, getAccessToken, clearAuth, isAuthenticated } from "../utils/auth";
 
 export default function InstructorDashboard() {
   const [exams, setExams] = useState([]);
   const [violations, setViolations] = useState([]);
   const [stats, setStats] = useState({});
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState('exams');
   const navigate = useNavigate();
 
@@ -26,6 +27,7 @@ export default function InstructorDashboard() {
 
   const fetchDashboardData = useCallback(async () => {
     try {
+      setError("");
       const [examsRes, violationsRes, statsRes] = await Promise.all([
         axios.get(API_ENDPOINTS.EXAMS, authConfig),
         axios.get(`${API_ENDPOINTS.VIOLATIONS}?limit=10`, authConfig),
@@ -35,21 +37,33 @@ export default function InstructorDashboard() {
       setExams(examsRes.data?.exams || examsRes.data || []);
       setViolations(violationsRes.data?.violations || violationsRes.data || []);
       setStats(statsRes.data || {});
-    } catch (error) {
-      console.error("Failed to fetch dashboard data:", error);
+    } catch (err) {
+      console.error("Failed to fetch dashboard data:", err);
+      if (err.response?.status === 401) {
+        setError("Session expired. Please login again.");
+        setTimeout(() => {
+          clearAuth();
+          navigate("/login");
+        }, 2000);
+      } else {
+        setError("Failed to load dashboard. Please try again.");
+      }
     } finally {
       setLoading(false);
     }
-  }, [authConfig]);
+  }, [authConfig, navigate]);
 
   useEffect(() => {
-    if (!token || (user.role && !['instructor', 'admin'].includes(user.role))) {
+    if (!token || !isAuthenticated()) {
       navigate("/login");
       return;
     }
+    if (user.role && !['instructor', 'admin'].includes(user.role)) {
+      navigate("/student-dashboard");
+      return;
+    }
     fetchDashboardData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, user.role, navigate]);
+  }, [token, user.role, navigate, fetchDashboardData]);
 
   const handleLogout = () => {
     clearAuth();
@@ -69,7 +83,31 @@ export default function InstructorDashboard() {
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-100">
-        <div className="text-xl font-semibold text-gray-700">Loading dashboard...</div>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
+          <div className="text-xl font-semibold text-gray-700">Loading dashboard...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-100">
+        <div className="text-center bg-white rounded-lg shadow-lg p-8 max-w-md">
+          <div className="text-6xl mb-4">⚠️</div>
+          <p className="text-red-600 font-semibold mb-4">{error}</p>
+          <button
+            onClick={() => {
+              setLoading(true);
+              setError("");
+              fetchDashboardData();
+            }}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-lg transition"
+          >
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
@@ -279,7 +317,7 @@ export default function InstructorDashboard() {
                           {violation.student?.name} ({violation.student?.email})
                         </p>
                         <p className="text-xs text-gray-400 mt-1">
-                          {formatDate(violation.timestamp)}
+                          {formatDate(violation.createdAt || violation.timestamp)}
                         </p>
                       </div>
                       <div className="text-right">
@@ -299,14 +337,34 @@ export default function InstructorDashboard() {
         {activeTab === 'create' && (
           <div className="bg-white rounded-lg shadow p-6">
             <h3 className="text-lg font-medium text-gray-900 mb-4">Create New Exam</h3>
-            <p className="text-gray-600 mb-6">
-              Use the exam creation interface to build comprehensive assessments with security monitoring.
+            <p className="text-gray-600 mb-4">
+              Import exams from JSON files to create comprehensive assessments with security monitoring.
             </p>
+            
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+              <h4 className="font-semibold text-blue-900 mb-2">📋 JSON Exam Format</h4>
+              <pre className="text-xs text-blue-800 bg-blue-100 p-3 rounded overflow-x-auto">
+{`{
+  "title": "Exam Title",
+  "duration": 60,
+  "maxViolations": 3,
+  "questions": [
+    {
+      "question": "What is...?",
+      "options": ["A", "B", "C", "D"],
+      "correct": 0,
+      "category": "General"
+    }
+  ]
+}`}
+              </pre>
+            </div>
+            
             <button
               onClick={() => navigate('/create-exam')}
               className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition"
             >
-              Start Creating Exam
+              Import Exam from JSON
             </button>
           </div>
         )}

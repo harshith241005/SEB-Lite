@@ -10,6 +10,7 @@ const {
 } = require("../utils/tokenUtils");
 const Token = require("../models/Token");
 const Session = require("../models/Session");
+const User = require("../models/User");
 const router = express.Router();
 
 // Helper function to get device info
@@ -19,6 +20,33 @@ const getDeviceInfo = (req) => {
     ipAddress: req.ip || req.connection.remoteAddress || "Unknown",
     platform: req.get("sec-ch-ua-platform") || "Unknown",
   };
+};
+
+// Helper function to create session and return tokens
+const createSessionAndTokens = async (user, req) => {
+  const tokenPayload = {
+    userId: user._id.toString(),
+    email: user.email,
+    role: user.role,
+  };
+
+  const accessToken = generateAccessToken(tokenPayload);
+  const refreshToken = generateRefreshToken(tokenPayload);
+
+  // Create session
+  const deviceInfo = getDeviceInfo(req);
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + 7); // 7 days for refresh token
+
+  await Session.create({
+    userId: user._id,
+    refreshToken,
+    deviceInfo,
+    expiresAt,
+    isActive: true,
+  });
+
+  return { accessToken, refreshToken };
 };
 
 // Register
@@ -44,41 +72,22 @@ router.post("/register", registerLimiter, async (req, res) => {
       return res.status(400).json({ error: "Invalid email format" });
     }
 
-    const existingUser = await db.findUser({ email });
+    const existingUser = await db.findUser({ email: email.toLowerCase() });
     if (existingUser) {
       return res.status(400).json({ error: "Email already registered" });
     }
 
-    // Don't hash password here - the User model's pre-save hook will hash it
+    // Create user - User model's pre-save hook will hash the password
     const user = await db.createUser({
       name,
-      email: email.toLowerCase(), // Normalize email
-      password: password, // Plain password - will be hashed by User model
+      email: email.toLowerCase(),
+      password: password,
       role: role || "student",
+      authProvider: "local",
     });
 
-    // Generate tokens
-    const tokenPayload = {
-      userId: user._id.toString(),
-      email: user.email,
-      role: user.role,
-    };
-
-    const accessToken = generateAccessToken(tokenPayload);
-    const refreshToken = generateRefreshToken(tokenPayload);
-
-    // Create session
-    const deviceInfo = getDeviceInfo(req);
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7); // 7 days for refresh token
-
-    await Session.create({
-      userId: user._id,
-      refreshToken,
-      deviceInfo,
-      expiresAt,
-      isActive: true,
-    });
+    // Generate tokens and create session
+    const { accessToken, refreshToken } = await createSessionAndTokens(user, req);
 
     res.status(201).json({
       message: "User registered successfully",
@@ -108,7 +117,6 @@ router.post("/login", loginLimiter, async (req, res) => {
 
     const user = await db.findUser({ email: email.toLowerCase() });
     if (!user) {
-      // Don't reveal if user exists (security best practice)
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
@@ -117,41 +125,34 @@ router.post("/login", loginLimiter, async (req, res) => {
       return res.status(403).json({ error: "Account is deactivated" });
     }
 
-    // Compare password
-    const isPasswordCorrect = await bcrypt.compare(password, user.password);
+    // Check if user signed up with Google (no password)
+    if (user.authProvider === "google" && !user.password) {
+      return res.status(400).json({ 
+        error: "This account uses Google Sign-In. Please use the Google login button." 
+      });
+    }
+
+    // Compare password using the model method or bcrypt directly
+    let isPasswordCorrect = false;
+    if (user.comparePassword) {
+      isPasswordCorrect = await user.comparePassword(password);
+    } else {
+      isPasswordCorrect = await bcrypt.compare(password, user.password);
+    }
 
     if (!isPasswordCorrect) {
+      console.log("Password comparison failed for user:", email);
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
-    // Generate tokens
-    const tokenPayload = {
-      userId: user._id.toString(),
-      email: user.email,
-      role: user.role,
-    };
-
-    const accessToken = generateAccessToken(tokenPayload);
-    const refreshToken = generateRefreshToken(tokenPayload);
-
-    // Create or update session
-    const deviceInfo = getDeviceInfo(req);
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7); // 7 days
-
-    // Deactivate all other active sessions for this user (one active session per user)
+    // Deactivate all other active sessions for this user
     await Session.updateMany(
       { userId: user._id, isActive: true },
       { isActive: false }
     );
 
-    await Session.create({
-      userId: user._id,
-      refreshToken,
-      deviceInfo,
-      expiresAt,
-      isActive: true,
-    });
+    // Generate tokens and create session
+    const { accessToken, refreshToken } = await createSessionAndTokens(user, req);
 
     res.json({
       message: "Login successful",
@@ -162,11 +163,99 @@ router.post("/login", loginLimiter, async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        avatar: user.avatar,
       },
     });
   } catch (error) {
     console.error("Login error:", error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: "An error occurred during login" });
+  }
+});
+
+// Google OAuth - Exchange Google token for app tokens
+router.post("/google", async (req, res) => {
+  try {
+    const { credential, clientId } = req.body;
+    
+    if (!credential) {
+      return res.status(400).json({ error: "Google credential is required" });
+    }
+
+    // Decode the Google JWT token (the credential from Google One Tap)
+    const { OAuth2Client } = require("google-auth-library");
+    const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+    
+    let payload;
+    try {
+      const ticket = await client.verifyIdToken({
+        idToken: credential,
+        audience: process.env.GOOGLE_CLIENT_ID,
+      });
+      payload = ticket.getPayload();
+    } catch (verifyError) {
+      console.error("Google token verification failed:", verifyError);
+      return res.status(401).json({ error: "Invalid Google token" });
+    }
+
+    const { sub: googleId, email, name, picture } = payload;
+
+    // Find or create user
+    let user = await User.findOne({ googleId });
+    
+    if (!user) {
+      // Check if user with same email exists
+      user = await User.findOne({ email: email.toLowerCase() });
+      
+      if (user) {
+        // Link Google account to existing user
+        user.googleId = googleId;
+        user.avatar = picture || user.avatar;
+        if (!user.authProvider || user.authProvider === "local") {
+          user.authProvider = "google";
+        }
+        await user.save();
+      } else {
+        // Create new user
+        user = await User.create({
+          googleId,
+          email: email.toLowerCase(),
+          name,
+          avatar: picture,
+          authProvider: "google",
+          role: "student",
+        });
+      }
+    } else {
+      // Update user info from Google
+      user.name = name || user.name;
+      user.avatar = picture || user.avatar;
+      await user.save();
+    }
+
+    // Deactivate all other active sessions
+    await Session.updateMany(
+      { userId: user._id, isActive: true },
+      { isActive: false }
+    );
+
+    // Generate tokens and create session
+    const { accessToken, refreshToken } = await createSessionAndTokens(user, req);
+
+    res.json({
+      message: "Google login successful",
+      accessToken,
+      refreshToken,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        avatar: user.avatar,
+      },
+    });
+  } catch (error) {
+    console.error("Google auth error:", error);
+    res.status(500).json({ error: "Google authentication failed" });
   }
 });
 

@@ -1,7 +1,8 @@
 const mongoose = require("mongoose");
 
-const ALLOWED_CATEGORIES = ["Java", "DSA", "DBMS", "OS", "SQL"];
-const ALLOWED_DIFFICULTIES = ["Easy", "Medium", "Hard"];
+// These are suggested categories but not strictly enforced
+const ALLOWED_CATEGORIES = ["Java", "DSA", "DBMS", "OS", "SQL", "Computer Networks", "Python", "JavaScript", "General", "Math", "Science", "Geography", "History", "Literature", "Chemistry", "Physics", "Computer Science"];
+const ALLOWED_DIFFICULTIES = ["Easy", "Medium", "Hard", "easy", "medium", "hard"];
 
 const questionSchema = new mongoose.Schema(
   {
@@ -15,26 +16,26 @@ const questionSchema = new mongoose.Schema(
       required: true,
       validate: {
         validator(value) {
-          return Array.isArray(value) && value.length === 4;
+          return Array.isArray(value) && value.length >= 2 && value.length <= 6;
         },
-        message: "Each question must define exactly 4 options.",
+        message: "Each question must define 2-6 options.",
       },
     },
     correctOptionIndex: {
       type: Number,
       required: true,
       min: 0,
-      max: 3,
+      max: 5,
     },
     category: {
       type: String,
-      enum: ALLOWED_CATEGORIES,
-      required: true,
+      default: "General",
+      trim: true,
     },
     difficulty: {
       type: String,
-      enum: ALLOWED_DIFFICULTIES,
-      required: true,
+      default: "Medium",
+      trim: true,
     },
     explanation: {
       type: String,
@@ -54,7 +55,7 @@ const examSchema = new mongoose.Schema(
     },
     company: {
       type: String,
-      required: true,
+      default: "General",
       trim: true,
     },
     type: {
@@ -74,7 +75,7 @@ const examSchema = new mongoose.Schema(
     },
     maxViolations: {
       type: Number,
-      required: true,
+      default: 5,
       min: 1,
     },
     passingPercentage: {
@@ -106,6 +107,11 @@ const examSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
+    },
+    sourceUrl: {
+      type: String,
+      default: null,
+      trim: true,
     },
   },
   { timestamps: true }
