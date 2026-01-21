@@ -55,5 +55,7 @@ temp/
 *.tmp
 *.bak
 
-# MongoDB
+# MongoDB local data (don't track database files)
+mongodb/data/
+mongodb/log.txt
 *.mongod
